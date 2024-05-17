@@ -42,6 +42,8 @@ pub struct App {
 impl App {
     pub fn new() -> std::io::Result<Self> {
         let directories = xdg::BaseDirectories::with_prefix("buisson")?;
+        let data_path = directories.get_data_home();
+        std::fs::create_dir_all(data_path)?;
         let database_path = directories.get_data_home().join("lessons.sqlite");
 
         let lessons = Graph::get_from_database(&database_path).unwrap();
