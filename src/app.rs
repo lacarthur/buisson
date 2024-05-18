@@ -3,15 +3,13 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, ListItem, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::{
-    components::fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
-    components::lesson_edit_form::LessonEditForm,
-    components::node_list::{GraphNodeDisplayer, NodeListDisplay},
-    lessons::{Graph, GraphNode, Id, LessonStatus},
+    components::{fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, lesson_edit_form::{LessonEditForm, LessonEditFormAction}, node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle}},
+    lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus},
     style_from_status,
 };
 
@@ -23,19 +21,10 @@ enum AppState {
     Quitting,
 }
 
-#[derive(Default)]
-struct AppNodeDisplayer;
-
-impl GraphNodeDisplayer for AppNodeDisplayer {
-    fn render<'a>(&'a self, node: &'a GraphNode) -> ListItem<'_> {
-        let text = Text::from(node.lesson.name.as_str());
-        ListItem::new(text).style(style_from_status(&node.status))
-    }
-}
 
 pub struct App {
     lessons: Graph,
-    display_list: NodeListDisplay<AppNodeDisplayer>,
+    display_list: NodeListDisplay<BasicNodeDisplayer>,
     state: AppState,
 }
 
@@ -46,12 +35,12 @@ impl App {
         std::fs::create_dir_all(data_path)?;
         let database_path = directories.get_data_home().join("lessons.sqlite");
 
-        let lessons = Graph::get_from_database(&database_path).unwrap();
+        let lessons = Graph::get_from_database(database_path).unwrap();
         let lesson_list_cache = lessons.lessons().cloned().collect();
 
         Ok(Self {
             lessons,
-            display_list: NodeListDisplay::new(lesson_list_cache, "Lessons".into()),
+            display_list: NodeListDisplay::new(lesson_list_cache),
             state: AppState::BrowsingLessons,
         })
     }
@@ -88,28 +77,30 @@ impl App {
         let right_panel_minus_bar = layout2[0];
         let bottom_bar = layout3[1];
 
+        let layout = Layout::vertical([Constraint::Percentage(15), Constraint::Percentage(70), Constraint::Percentage(15)])
+            .split(left_panel_minus_bar);
+        let layout = Layout::horizontal([Constraint::Percentage(10), Constraint::Percentage(80), Constraint::Percentage(10)])
+            .split(layout[1]);
+
+        let fuzzy_finder_area = layout[1];
+
+        self.render_lessons_list(left_panel_minus_bar, frame);
+        self.render_status_line(bottom_bar, frame);
+
         match &self.state {
             AppState::Quitting => (),
             AppState::AddingNewLesson(lesson) => {
-                self.display_list.render(left_panel_minus_bar, frame);
                 lesson.render(right_panel_minus_bar, frame);
-                self.render_status_line(bottom_bar, frame);
             }
             AppState::EditingLesson(_, lesson) => {
-                self.display_list
-                    .render_stateful(left_panel_minus_bar, frame);
                 lesson.render(right_panel_minus_bar, frame);
-                self.render_status_line(bottom_bar, frame);
             }
             AppState::BrowsingLessons => {
-                self.display_list
-                    .render_stateful(left_panel_minus_bar, frame);
                 self.render_lesson_display(right_panel_minus_bar, frame);
-                self.render_status_line(bottom_bar, frame);
             }
             AppState::Searching(search_input) => {
-                self.render_help(right_panel, frame);
-                search_input.render(left_panel, frame);
+                self.render_help(right_panel_minus_bar, frame);
+                search_input.render(fuzzy_finder_area, frame);
             }
         }
     }
@@ -184,6 +175,26 @@ impl App {
         );
     }
 
+    fn render_lessons_list(&self, area: Rect, frame: &mut Frame<'_>) {
+        let style = match &self.state {
+            AppState::BrowsingLessons | AppState::Searching(_) => Style::default().bold(),
+            _ => Style::default(),
+        };
+        let block = Block::new()
+            .title(Line::from("Lessons").alignment(Alignment::Center))
+            .borders(Borders::ALL)
+            .style(style);
+
+        match self.state {
+            AppState::BrowsingLessons | AppState::EditingLesson(_, _) => {
+                self.display_list.render_with_style(area, frame, NodeListStyle::default().block(block));
+            }
+            _ => {
+                self.display_list.render_with_style(area, frame, NodeListStyle::default().block(block).dont_display_selected());
+            }
+        }
+    }
+
     fn selected_node(&self) -> Option<&GraphNode> {
         self.display_list
             .selected_id()
@@ -201,7 +212,8 @@ impl App {
                 KeyCode::Char('a') => {
                     self.state = AppState::AddingNewLesson(LessonEditForm::new(
                         "Add New Lesson".into(),
-                        String::new(),
+                        LessonInfo::default(),
+                        self.lessons.lessons().cloned().collect(),
                     ))
                 }
                 KeyCode::Char('s') => {
@@ -213,7 +225,8 @@ impl App {
                     if let Some(currently_selected) = self.selected_node() {
                         let form = LessonEditForm::new(
                             "Edit Lesson".into(),
-                            currently_selected.lesson.name.clone(),
+                            currently_selected.lesson.to_lesson_info(),
+                            self.lessons.lessons().cloned().collect(),
                         );
                         self.state =
                             AppState::EditingLesson(currently_selected.lesson.get_id(), form);
@@ -221,24 +234,24 @@ impl App {
                 }
                 _ => self.display_list.handle_key(key),
             },
-            AppState::AddingNewLesson(event_name) => match key.code {
-                KeyCode::Esc => self.state = AppState::BrowsingLessons,
-                KeyCode::Enter => {
-                    self.lessons.create_new_node(event_name.to_lesson_info());
+            AppState::AddingNewLesson(event_name) => match event_name.handle_key(key) {
+                LessonEditFormAction::Terminate(Some(lesson_info)) => {
+                    self.lessons.create_new_node(lesson_info);
                     self.update_cache(None);
                     self.state = AppState::BrowsingLessons;
                 }
-                _ => event_name.handle_key(key),
-            },
-            AppState::EditingLesson(id, lesson) => match key.code {
-                KeyCode::Esc => self.state = AppState::BrowsingLessons,
-                KeyCode::Enter => {
-                    self.lessons.edit_node(*id, lesson.to_lesson_info());
+                LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
+                LessonEditFormAction::Noop => (),
+            }
+            AppState::EditingLesson(id, lesson) => match lesson.handle_key(key) {
+                LessonEditFormAction::Terminate(Some(lesson_info)) => {
+                    self.lessons.edit_node(*id, lesson_info);
                     self.update_cache(None);
                     self.state = AppState::BrowsingLessons;
                 }
-                _ => lesson.handle_key(key),
-            },
+                LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
+                LessonEditFormAction::Noop => (),
+            }
             AppState::Searching(finder) => {
                 if let FuzzyFinderAction::Terminate(id) = finder.handle_key(key) {
                     self.state = AppState::BrowsingLessons;

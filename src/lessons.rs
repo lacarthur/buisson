@@ -1,4 +1,4 @@
-use std::{io::Cursor, path::Path};
+use std::{io::Cursor, path::{Path, PathBuf}};
 
 use chrono::{Days, NaiveDate};
 use rusqlite::Connection;
@@ -18,9 +18,10 @@ fn days_from_level(level: u32) -> u64 {
 }
 
 /// The status of a lesson, independant of the runtime
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum LessonStatus {
     /// This lesson has never been practiced
+    #[default]
     NotPracticed,
     /// For now, we consider this lesson completely acquired, but in the future, we'll want to
     /// spend more time on it.
@@ -63,7 +64,7 @@ pub enum NodeStatus {
     Pending,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LessonInfo {
     pub name: String,
     pub depends_on: Vec<Id>,
@@ -107,6 +108,14 @@ impl Lesson {
     pub fn get_id(&self) -> Id {
         self.id
     }
+
+    pub fn to_lesson_info(&self) -> LessonInfo {
+        LessonInfo {
+            name: self.name.clone(),
+            depends_on: self.depends_on.clone(),
+            status: self.status.clone(),
+        }
+    }
 }
 
 /// A runtime node of the graph structure.
@@ -123,6 +132,7 @@ pub struct GraphNode {
 pub struct Graph {
     nodes: Vec<GraphNode>,
     children: Vec<Vec<Id>>,
+    path: PathBuf,
 }
 
 impl Graph {
@@ -138,6 +148,13 @@ impl Graph {
             status: lesson_info.status,
         };
         let node_status = self.compute_node_status(&lesson.depends_on, &lesson.status);
+
+        let connection = Connection::open(&self.path).unwrap();
+
+        connection.execute(
+            "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
+            (&id, &lesson.name, &ids_to_bytes(&lesson.depends_on), ron::to_string(&lesson.status).unwrap()),
+        ).unwrap();
 
         self.nodes.push(GraphNode {
             lesson,
@@ -168,6 +185,12 @@ impl Graph {
         for &parent in &lesson_info.depends_on {
             self.children[parent as usize].push(id);
         }
+
+        let connection = Connection::open(&self.path).unwrap();
+
+        connection.execute("UPDATE lesson SET name = ?1, depends_on = ?2, status = ?3 WHERE id = ?4",
+            (&lesson_info.name, &ids_to_bytes(&lesson_info.depends_on), ron::to_string(&lesson_info.status).unwrap(), id)).unwrap();
+
         self.nodes[id as usize].lesson.name = lesson_info.name;
         self.nodes[id as usize].lesson.depends_on = lesson_info.depends_on;
         self.nodes[id as usize].lesson.status = lesson_info.status;
@@ -198,7 +221,7 @@ impl Graph {
         }
     }
 
-    pub fn get_from_database(database_path: &Path) -> rusqlite::Result<Self> {
+    pub fn get_from_database(database_path: PathBuf) -> rusqlite::Result<Self> {
         let builder = GraphBuilder::load_from_database(database_path)?;
         Ok(builder.into_graph())
     }
@@ -230,6 +253,7 @@ impl Graph {
 #[derive(Debug, Default)]
 struct GraphBuilder {
     lessons: Vec<(Lesson, Option<NodeStatus>)>,
+    path: PathBuf,
 }
 
 impl GraphBuilder {
@@ -251,6 +275,7 @@ impl GraphBuilder {
                 })
                 .collect(),
             children,
+            path: self.path,
         }
     }
 
@@ -270,9 +295,9 @@ impl GraphBuilder {
         Ok(())
     }
 
-    fn load_from_database(database_path: &Path) -> rusqlite::Result<Self> {
-        if std::fs::metadata(database_path).is_ok() {
-            let db = Connection::open(database_path)?;
+    fn load_from_database(database_path: PathBuf) -> rusqlite::Result<Self> {
+        if std::fs::metadata(&database_path).is_ok() {
+            let db = Connection::open(&database_path)?;
 
             let mut stmt = db.prepare("SELECT id, name, depends_on, status FROM lesson")?;
 
@@ -289,10 +314,10 @@ impl GraphBuilder {
                 .map(|val| (val.unwrap(), None))
                 .collect::<Vec<_>>();
 
-            Ok(GraphBuilder { lessons })
+            Ok(GraphBuilder { lessons, path: database_path })
         } else {
-            Self::create_database(database_path)?;
-            Ok(Self::default())
+            Self::create_database(&database_path)?;
+            Ok(GraphBuilder { lessons: vec![], path: database_path })
         }
     }
 
