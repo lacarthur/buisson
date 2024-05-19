@@ -125,6 +125,7 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
     /// manually select the node wit id `id`. This is very wonky, because it relies on the fact
     /// that the `id` is the list index. this basically only works if the list is displaying all
     /// the nodes, and in order. TODO: make this better
+    /// also, should this be mut?
     pub fn select(&self, id: Id) {
         *self.state.borrow_mut() = ListState::default().with_selected(Some(id as usize));
     }

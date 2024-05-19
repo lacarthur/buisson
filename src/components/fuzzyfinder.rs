@@ -54,9 +54,13 @@ pub enum FuzzyFinderAction {
 
 impl FuzzyFinder {
     pub fn new(list: Vec<GraphNode>) -> Self {
+        let display_list = NodeListDisplay::new(list.clone());
+        if !list.is_empty() {
+            display_list.select(0);
+        }
         Self {
             original_list: list.clone(),
-            display_list: NodeListDisplay::new(list),
+            display_list,
             search_bar: TextInput::default(),
             state: FuzzyFinderState::TypingSearch,
         }
@@ -126,6 +130,9 @@ impl FuzzyFinder {
                             .cloned()
                             .collect(),
                     );
+                    if !self.display_list.is_empty() {
+                        self.display_list.select(0);
+                    }
                 }
             },
             FuzzyFinderState::NavigatingResults => match key.code {
