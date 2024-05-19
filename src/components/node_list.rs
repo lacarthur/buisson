@@ -2,10 +2,17 @@ use std::cell::RefCell;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::Rect, style::{Modifier, Style}, text::Text, widgets::{Block, List, ListItem, ListState}, Frame
+    layout::Rect,
+    style::{Modifier, Style},
+    text::Text,
+    widgets::{Block, List, ListItem, ListState},
+    Frame,
 };
 
-use crate::{lessons::{GraphNode, Id}, style_from_status};
+use crate::{
+    lessons::{GraphNode, Id},
+    style_from_status,
+};
 
 /// A type that implements this trait decides how a lesson is displayed in the list.
 pub trait GraphNodeDisplayer: Default {
@@ -92,18 +99,14 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
     fn get_list<'a>(&'a self, block: Option<Block<'a>>) -> List<'a> {
         let items = self.nodes.iter().map(|node| self.displayer.render(node));
         match block {
-            Some(block) => {
-                List::new(items)
-                    .block(block)
-                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            }
+            Some(block) => List::new(items)
+                .block(block)
+                .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
             None => {
-                List::new(items)
-                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED))
             }
         }
     }
-
 
     pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
         self.render_with_style(area, frame, NodeListStyle::default());

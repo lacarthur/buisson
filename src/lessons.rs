@@ -1,4 +1,7 @@
-use std::{io::Cursor, path::{Path, PathBuf}};
+use std::{
+    io::Cursor,
+    path::{Path, PathBuf},
+};
 
 use chrono::{Days, NaiveDate};
 use rusqlite::Connection;
@@ -163,10 +166,17 @@ impl Graph {
 
         let connection = Connection::open(&self.path).unwrap();
 
-        connection.execute(
-            "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
-            (&id, &lesson.name, &ids_to_bytes(&lesson.depends_on), ron::to_string(&lesson.status).unwrap()),
-        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
+                (
+                    &id,
+                    &lesson.name,
+                    &ids_to_bytes(&lesson.depends_on),
+                    ron::to_string(&lesson.status).unwrap(),
+                ),
+            )
+            .unwrap();
 
         self.nodes.push(GraphNode {
             lesson,
@@ -205,8 +215,17 @@ impl Graph {
 
         let connection = Connection::open(&self.path).unwrap();
 
-        connection.execute("UPDATE lesson SET name = ?1, depends_on = ?2, status = ?3 WHERE id = ?4",
-            (&lesson_info.name, &ids_to_bytes(&lesson_info.depends_on), ron::to_string(&lesson_info.status).unwrap(), id)).unwrap();
+        connection
+            .execute(
+                "UPDATE lesson SET name = ?1, depends_on = ?2, status = ?3 WHERE id = ?4",
+                (
+                    &lesson_info.name,
+                    &ids_to_bytes(&lesson_info.depends_on),
+                    ron::to_string(&lesson_info.status).unwrap(),
+                    id,
+                ),
+            )
+            .unwrap();
 
         self.nodes[id as usize].lesson.name = lesson_info.name;
         self.nodes[id as usize].lesson.depends_on = lesson_info.depends_on;
@@ -332,10 +351,16 @@ impl GraphBuilder {
                 .map(|val| (val.unwrap(), None))
                 .collect::<Vec<_>>();
 
-            Ok(GraphBuilder { lessons, path: database_path })
+            Ok(GraphBuilder {
+                lessons,
+                path: database_path,
+            })
         } else {
             Self::create_database(&database_path)?;
-            Ok(GraphBuilder { lessons: vec![], path: database_path })
+            Ok(GraphBuilder {
+                lessons: vec![],
+                path: database_path,
+            })
         }
     }
 

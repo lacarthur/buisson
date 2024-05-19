@@ -8,7 +8,11 @@ use ratatui::{
 };
 
 use crate::{
-    components::{fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, lesson_edit_form::{LessonEditForm, LessonEditFormAction}, node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle}},
+    components::{
+        fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
+        lesson_edit_form::{LessonEditForm, LessonEditFormAction},
+        node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle},
+    },
     lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus},
     style_from_status,
 };
@@ -84,10 +88,18 @@ impl App {
         let right_panel_minus_bar = layout2[0];
         let bottom_bar = layout3[1];
 
-        let layout = Layout::vertical([Constraint::Percentage(15), Constraint::Percentage(70), Constraint::Percentage(15)])
-            .split(left_panel_minus_bar);
-        let layout = Layout::horizontal([Constraint::Percentage(10), Constraint::Percentage(80), Constraint::Percentage(10)])
-            .split(layout[1]);
+        let layout = Layout::vertical([
+            Constraint::Percentage(15),
+            Constraint::Percentage(70),
+            Constraint::Percentage(15),
+        ])
+        .split(left_panel_minus_bar);
+        let layout = Layout::horizontal([
+            Constraint::Percentage(10),
+            Constraint::Percentage(80),
+            Constraint::Percentage(10),
+        ])
+        .split(layout[1]);
 
         let fuzzy_finder_area = layout[1];
 
@@ -196,10 +208,20 @@ impl App {
 
         match self.state {
             AppState::BrowsingLessons | AppState::EditingLesson(_, _) => {
-                self.display_list.render_with_style(area, frame, NodeListStyle::default().block(block));
+                self.display_list.render_with_style(
+                    area,
+                    frame,
+                    NodeListStyle::default().block(block),
+                );
             }
             _ => {
-                self.display_list.render_with_style(area, frame, NodeListStyle::default().block(block).dont_display_selected());
+                self.display_list.render_with_style(
+                    area,
+                    frame,
+                    NodeListStyle::default()
+                        .block(block)
+                        .dont_display_selected(),
+                );
             }
         }
     }
@@ -251,7 +273,7 @@ impl App {
                 }
                 LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
                 LessonEditFormAction::Noop => (),
-            }
+            },
             AppState::EditingLesson(id, lesson) => match lesson.handle_key(key) {
                 LessonEditFormAction::Terminate(Some(lesson_info)) => {
                     self.lessons.edit_node(*id, lesson_info);
@@ -260,7 +282,7 @@ impl App {
                 }
                 LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
                 LessonEditFormAction::Noop => (),
-            }
+            },
             AppState::Searching(finder) => {
                 if let FuzzyFinderAction::Terminate(id) = finder.handle_key(key) {
                     self.state = AppState::BrowsingLessons;

@@ -1,5 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{layout::Rect, widgets::{Block, Paragraph}, Frame};
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Paragraph},
+    Frame,
+};
 
 #[derive(Default)]
 pub struct TextInputStyle<'a> {
@@ -13,7 +17,7 @@ impl<'a> TextInputStyle<'a> {
         self.display_cursor = true;
         self
     }
-    
+
     pub fn dont_display_cursor(mut self) -> Self {
         self.display_cursor = false;
         self
@@ -52,15 +56,13 @@ impl TextInput {
 
                 frame.render_widget(block, area);
                 self.render_textinput(inner_area, frame, style.display_cursor);
-            },
+            }
             None => self.render_textinput(area, frame, style.display_cursor),
         }
     }
 
     pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-        }
+        Self { text: text.into() }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) {

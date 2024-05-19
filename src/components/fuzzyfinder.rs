@@ -1,6 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect}, style::{Style, Stylize}, text::{Line, Text}, widgets::{Block, Borders, ListItem}, Frame
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Style, Stylize},
+    text::{Line, Text},
+    widgets::{Block, Borders, ListItem},
+    Frame,
 };
 
 use crate::{
@@ -72,35 +76,37 @@ impl FuzzyFinder {
         let block = Block::new()
             .title(Line::from("Search").alignment(Alignment::Center))
             .borders(Borders::ALL)
-            .style(if let FuzzyFinderState::TypingSearch = self.state { Style::default().bold() } else { Style::default() });
+            .style(if let FuzzyFinderState::TypingSearch = self.state {
+                Style::default().bold()
+            } else {
+                Style::default()
+            });
 
         let inner_area = block.inner(area);
-        
+
         frame.render_widget(block, area);
 
         match &self.state {
             FuzzyFinderState::NavigatingResults => self.search_bar.render(inner_area, frame),
             FuzzyFinderState::TypingSearch => self.search_bar.render_with_style(
-                inner_area, 
-                frame, 
+                inner_area,
+                frame,
                 TextInputStyle::default().display_cursor(),
             ),
         }
     }
 
     fn render_results_list(&self, area: Rect, frame: &mut Frame<'_>) {
-        let style = NodeListStyle::default()
-            .block(Block::new()
+        let style = NodeListStyle::default().block(
+            Block::new()
                 .borders(Borders::ALL)
                 .title(Line::from("Results").alignment(Alignment::Center))
-                .style(
-                    if let FuzzyFinderState::NavigatingResults = self.state {
-                        Style::default().bold()
-                    } else {
-                        Style::default()
-                    }
-                )
-            );
+                .style(if let FuzzyFinderState::NavigatingResults = self.state {
+                    Style::default().bold()
+                } else {
+                    Style::default()
+                }),
+        );
         self.display_list.render_with_style(area, frame, style);
     }
 
