@@ -43,7 +43,7 @@ impl TextInput {
         let text_widget = Paragraph::new(self.text.as_str());
 
         if display_cursor {
-            frame.set_cursor(area.x + self.text.len() as u16, area.y);
+            frame.set_cursor(area.x + self.text_len(), area.y);
         }
 
         frame.render_widget(text_widget, area);
@@ -81,5 +81,10 @@ impl TextInput {
 
     pub fn to_str(&self) -> &str {
         &self.text
+    }
+
+    /// the length of the displayed text, in actual characters instead of bytes
+    fn text_len(&self) -> u16 {
+        self.text.chars().count() as u16
     }
 }
