@@ -127,7 +127,17 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
     /// the nodes, and in order. TODO: make this better
     /// also, should this be mut?
     pub fn select(&self, id: Id) {
-        *self.state.borrow_mut() = ListState::default().with_selected(Some(id as usize));
+        let id = self
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, node)| node.lesson.get_id() == id)
+            .map(|(list_index, _)| list_index);
+        *self.state.borrow_mut() = ListState::default().with_selected(id);
+    }
+
+    pub fn select_first(&self) {
+        *self.state.borrow_mut() = ListState::default().with_selected(Some(0));
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) {

@@ -1,6 +1,5 @@
 # TODO
 
-- fix select function in the node list
 - add error handling to the IO code
 - add tests to the non-ui code
 - add more keybindings for the lesson form

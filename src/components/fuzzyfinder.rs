@@ -56,7 +56,7 @@ impl FuzzyFinder {
     pub fn new(list: Vec<GraphNode>) -> Self {
         let display_list = NodeListDisplay::new(list.clone());
         if !list.is_empty() {
-            display_list.select(0);
+            display_list.select_first();
         }
         Self {
             original_list: list.clone(),
@@ -131,7 +131,7 @@ impl FuzzyFinder {
                             .collect(),
                     );
                     if !self.display_list.is_empty() {
-                        self.display_list.select(0);
+                        self.display_list.select_first();
                     }
                 }
             },
