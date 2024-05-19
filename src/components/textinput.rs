@@ -3,6 +3,7 @@ use ratatui::{layout::Rect, widgets::{Block, Paragraph}, Frame};
 
 #[derive(Default)]
 pub struct TextInputStyle<'a> {
+    /// whether or not to display the cursor.
     display_cursor: bool,
     block: Option<Block<'a>>,
 }

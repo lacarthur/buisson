@@ -19,9 +19,13 @@ enum LessonEditFormState {
 }
 
 pub struct LessonEditForm {
+    /// the name of the whole block. This is a variable because if we're adding a new lesson or
+    /// editing a currently existing one, this variable should be different.
     block_name: String,
     name_input: TextInput,
     prerequisites: NodeListDisplay<BasicNodeDisplayer>,
+    /// does this actually need to own this? I don't know, something to investigate. It certainly
+    /// doesn't modify it.
     all_current_lessons: Vec<GraphNode>,
     state: LessonEditFormState,
 }

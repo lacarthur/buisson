@@ -7,10 +7,12 @@ use ratatui::{
 
 use crate::{lessons::{GraphNode, Id}, style_from_status};
 
+/// A type that implements this trait decides how a lesson is displayed in the list.
 pub trait GraphNodeDisplayer: Default {
     fn render<'a>(&'a self, node: &'a GraphNode) -> ListItem<'_>;
 }
 
+/// This one just colors the text depending on the status of the node
 #[derive(Default)]
 pub struct BasicNodeDisplayer;
 
@@ -22,6 +24,7 @@ impl GraphNodeDisplayer for BasicNodeDisplayer {
 }
 
 pub struct NodeListStyle<'a> {
+    /// whether or not to highlight the currently selected node
     display_selected: bool,
     block: Option<Block<'a>>,
 }
@@ -50,6 +53,8 @@ impl<'a> NodeListStyle<'a> {
 #[derive(Debug)]
 pub struct NodeListDisplay<NodeDisplayer: GraphNodeDisplayer + Default> {
     nodes: Vec<GraphNode>,
+    // in a refcell because rendering a list requires mutating the `ListState`, and I don't want
+    // `render` to require a mutable reference.
     state: RefCell<ListState>,
     displayer: NodeDisplayer,
 }
@@ -63,6 +68,7 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
         }
     }
 
+    /// completely replaces the current nodes displayed with the ones provided as argument
     pub fn update_nodes(&mut self, new_nodes: Vec<GraphNode>) {
         self.nodes = new_nodes;
 
@@ -77,11 +83,13 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
         }
     }
 
+    /// add a node to the current nodelist, mutating it in place
     pub fn add_new_node(&mut self, node: GraphNode) {
         self.nodes.push(node);
     }
 
-    fn get_widget<'a>(&'a self, block: Option<Block<'a>>) -> List<'a> {
+    /// return the `List` that will get rendered, styling the nodes according to `self.displayer`.
+    fn get_list<'a>(&'a self, block: Option<Block<'a>>) -> List<'a> {
         let items = self.nodes.iter().map(|node| self.displayer.render(node));
         match block {
             Some(block) => {
@@ -102,7 +110,7 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
     }
 
     pub fn render_with_style(&self, area: Rect, frame: &mut Frame<'_>, style: NodeListStyle) {
-        let list = self.get_widget(style.block);
+        let list = self.get_list(style.block);
 
         if style.display_selected {
             frame.render_stateful_widget(list, area, &mut self.state.borrow_mut());
@@ -111,6 +119,9 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
         }
     }
 
+    /// manually select the node wit id `id`. This is very wonky, because it relies on the fact
+    /// that the `id` is the list index. this basically only works if the list is displaying all
+    /// the nodes, and in order. TODO: make this better
     pub fn select(&self, id: Id) {
         *self.state.borrow_mut() = ListState::default().with_selected(Some(id as usize));
     }

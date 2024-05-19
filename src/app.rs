@@ -13,6 +13,7 @@ use crate::{
     style_from_status,
 };
 
+/// The state of the main application
 enum AppState {
     BrowsingLessons,
     AddingNewLesson(LessonEditForm),
@@ -21,9 +22,12 @@ enum AppState {
     Quitting,
 }
 
-
 pub struct App {
     lessons: Graph,
+    /// The component that displays the list of lessons. It is not recomputed every frame, as that
+    /// would make filtering the results expensive, as the filter would need to be recomputed every
+    /// time. As it stands, `display_list` caches what needs to be displayed, and only updates it
+    /// when relevant
     display_list: NodeListDisplay<BasicNodeDisplayer>,
     state: AppState,
 }
@@ -45,6 +49,9 @@ impl App {
         })
     }
 
+    /// This function updates the cache of the lesson list to be displayed. Right now, it is only
+    /// called when adding/updating a lesson, and so search_request is always `None`. But if
+    /// filtering is added, this could become more useful.
     fn update_cache(&mut self, search_request: Option<String>) {
         match search_request {
             Some(search_request) => self.display_list.update_nodes(
@@ -71,9 +78,9 @@ impl App {
         let layout3 =
             Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(layout[0]);
 
-        let left_panel = layout[0];
+        let _left_panel = layout[0];
         let left_panel_minus_bar = layout3[0];
-        let right_panel = layout[1];
+        let _right_panel = layout[1];
         let right_panel_minus_bar = layout2[0];
         let bottom_bar = layout3[1];
 
@@ -96,7 +103,7 @@ impl App {
                 lesson.render(right_panel_minus_bar, frame);
             }
             AppState::BrowsingLessons => {
-                self.render_lesson_display(right_panel_minus_bar, frame);
+                self.render_side_panel(right_panel_minus_bar, frame);
             }
             AppState::Searching(search_input) => {
                 self.render_help(right_panel_minus_bar, frame);
@@ -105,6 +112,7 @@ impl App {
         }
     }
 
+    /// Renders information about `node`.
     fn render_node_display(&self, area: Rect, frame: &mut Frame<'_>, node: &GraphNode) {
         let step_text = match node.lesson.status {
             LessonStatus::GoodEnough => String::from("Step : Known"),
@@ -139,6 +147,7 @@ impl App {
         frame.render_widget(widget, area);
     }
 
+    /// renders help to `area`. Things like keybindings, etc...
     fn render_help(&self, area: Rect, frame: &mut Frame<'_>) {
         let block = Block::new()
             .title("Help")
@@ -153,7 +162,7 @@ impl App {
         frame.render_widget(help_text, area);
     }
 
-    fn render_lesson_display(&self, area: Rect, frame: &mut Frame<'_>) {
+    fn render_side_panel(&self, area: Rect, frame: &mut Frame<'_>) {
         if let Some(node) = self.selected_node() {
             self.render_node_display(area, frame, node);
         } else {

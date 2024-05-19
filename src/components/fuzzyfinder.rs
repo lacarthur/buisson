@@ -22,9 +22,12 @@ impl GraphNodeDisplayer for FuzzyFinderNodeDisplayer {
     }
 }
 
+/// A fuzzy finder, useful to search for lessons by name.
 #[derive(Debug)]
 pub struct FuzzyFinder {
+    /// The original list of elements you are searching through
     original_list: Vec<GraphNode>,
+    /// The component displaying the list of lesssons matching the current search
     display_list: NodeListDisplay<FuzzyFinderNodeDisplayer>,
     search_bar: TextInput,
     state: FuzzyFinderState,
@@ -36,8 +39,12 @@ pub enum FuzzyFinderState {
     NavigatingResults,
 }
 
+/// An action to be returned when the fuzzy finder handles an event.
 pub enum FuzzyFinderAction {
+    /// Nothing, the fuzzy finder is still running
     Noop,
+    /// The fuzzy finder should be terminated, and the user selected either nothing (`None`) or
+    /// the lesson whose `Id` is given here.
     Terminate(Option<Id>),
 }
 

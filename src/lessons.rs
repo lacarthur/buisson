@@ -46,6 +46,8 @@ impl LessonStatus {
     }
 }
 
+/// the date that a lesson is considered "known", given that it was last practiced on `date` to
+/// level `level`.
 fn good_until(level: u32, date: NaiveDate) -> NaiveDate {
     date.checked_add_days(Days::new(days_from_level(level)))
         .unwrap()
@@ -67,6 +69,7 @@ pub enum NodeStatus {
 #[derive(Debug, Clone, Default)]
 pub struct LessonInfo {
     pub name: String,
+    /// The list of all prerequisite lessons, identified by their `id`.
     pub depends_on: Vec<Id>,
     pub status: LessonStatus,
 }
@@ -84,6 +87,7 @@ pub struct Lesson {
     pub status: LessonStatus,
 }
 
+/// used to serialize the ids of the prerequisite lessons.
 fn ids_to_bytes(ids: &Vec<Id>) -> Vec<u8> {
     let mut writer = vec![];
 
@@ -93,6 +97,7 @@ fn ids_to_bytes(ids: &Vec<Id>) -> Vec<u8> {
     writer
 }
 
+/// used to deserialize the ids of the prerequisite lessons.
 fn ids_from_bytes(bytes: &Vec<u8>) -> Vec<Id> {
     let mut reader = Cursor::new(bytes);
 
@@ -131,11 +136,18 @@ pub struct GraphNode {
 #[derive(Debug)]
 pub struct Graph {
     nodes: Vec<GraphNode>,
+    /// `children[id]` is the list of lessons that have lesson `id` as a prerequisite. This is kept
+    /// in memory to help with updating the nodes at runtime. It is not stored to the disk and is
+    /// instead computed at the start of the program
     children: Vec<Vec<Id>>,
+    /// the path to the database
     path: PathBuf,
 }
 
 impl Graph {
+    /// create a new node in the graph, and update the relevant data structures inside. This is a
+    /// public facing function, and should be able to be called without altering the correctness of
+    /// the state of `self`.
     pub fn create_new_node(&mut self, lesson_info: LessonInfo) {
         let id = self.nodes.len() as u64;
         for &parent in &lesson_info.depends_on {
@@ -163,6 +175,8 @@ impl Graph {
         self.children.push(vec![]);
     }
 
+    /// this function is called when a node is edited. It is useful if a lesson has a new
+    /// prerequisite, its status may need updating. It is only the runtime status though.
     fn update_lesson_status(&mut self, id: Id) {
         let lesson_status = &self.nodes[id as usize].lesson.status;
         let old_lesson_status = self.nodes[id as usize].status.clone();
@@ -170,6 +184,9 @@ impl Graph {
         let new_lesson_status =
             self.compute_node_status(&self.nodes[id as usize].lesson.depends_on, lesson_status);
 
+        // if the status hasnt been updated, there is no need to propagate the change to its
+        // children. If it has however, their status may change and we need to recursively call the
+        // function.
         if old_lesson_status != new_lesson_status {
             self.nodes[id as usize].status = new_lesson_status;
             for &child in &self.children[id as usize].clone() {
@@ -203,6 +220,7 @@ impl Graph {
             .filter(move |&node| node.lesson.name.contains(&search_request))
     }
 
+    /// this function is called when the statuses of all the prereqs have been computed.
     fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> NodeStatus {
         let mut missing_prereqs = vec![];
         for &prereq_id in prereqs {
@@ -321,6 +339,8 @@ impl GraphBuilder {
         }
     }
 
+    /// this function is to be called recursivley, changing the stored status of the nodes as it
+    /// computes it.
     fn get_status(&mut self, id: Id) -> NodeStatus {
         if let Some(status) = &self.lessons[id as usize].1 {
             return status.clone();
@@ -348,6 +368,7 @@ impl GraphBuilder {
         status
     }
 
+    /// ensures every status is being computed
     fn resolve(&mut self) {
         for i in 0..self.lessons.len() {
             self.get_status(i as u64);
