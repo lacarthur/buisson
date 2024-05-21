@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
@@ -85,7 +85,8 @@ impl LessonEditForm {
     pub fn handle_key(&mut self, key: &KeyEvent) -> LessonEditFormAction {
         match &mut self.state {
             LessonEditFormState::EditingName => match key.code {
-                KeyCode::Tab => self.state = LessonEditFormState::NavigatingPrereqs,
+                KeyCode::Tab | KeyCode::Enter => self.state = LessonEditFormState::NavigatingPrereqs,
+                KeyCode::Char('j') if key.modifiers == KeyModifiers::ALT => self.state = LessonEditFormState::NavigatingPrereqs,
                 KeyCode::Esc => return LessonEditFormAction::Terminate(None),
                 _ => self.name_input.handle_key(key),
             },
@@ -110,6 +111,8 @@ impl LessonEditForm {
                 KeyCode::Esc => return LessonEditFormAction::Terminate(None),
                 KeyCode::Tab => self.state = LessonEditFormState::Validating,
                 KeyCode::BackTab => self.state = LessonEditFormState::EditingName,
+                KeyCode::Char('j') if key.modifiers == KeyModifiers::ALT => self.state = LessonEditFormState::Validating,
+                KeyCode::Char('k') if key.modifiers == KeyModifiers::ALT => self.state = LessonEditFormState::EditingName,
                 _ => self.prerequisites.handle_key(key),
             },
             LessonEditFormState::AddingPrereq(finder) => match finder.handle_key(key) {
@@ -124,6 +127,7 @@ impl LessonEditForm {
                 FuzzyFinderAction::Noop => (),
             },
             LessonEditFormState::Validating => match key.code {
+                KeyCode::Char('k') if key.modifiers == KeyModifiers::ALT => self.state = LessonEditFormState::NavigatingPrereqs,
                 KeyCode::BackTab => self.state = LessonEditFormState::NavigatingPrereqs,
                 KeyCode::Enter => {
                     return LessonEditFormAction::Terminate(Some(self.to_lesson_info()))
