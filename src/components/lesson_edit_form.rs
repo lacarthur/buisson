@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     components::textinput::TextInput,
-    lessons::{GraphNode, LessonInfo, LessonStatus},
+    lessons::{GraphNode, Id, LessonInfo, LessonStatus},
 };
 
 use super::{
@@ -26,16 +26,34 @@ enum LessonEditFormState {
     Validating,
 }
 
+pub enum FormType {
+    NewLesson,
+    EditLesson(Id),
+}
+
 pub struct LessonEditForm {
-    /// the name of the whole block. This is a variable because if we're adding a new lesson or
-    /// editing a currently existing one, this variable should be different.
-    block_name: String,
+    form_type: FormType,
     name_input: TextInput,
     prerequisites: NodeListDisplay<BasicNodeDisplayer>,
-    /// does this actually need to own this? I don't know, something to investigate. It certainly
+    /// does the form actually need to own this? I don't know, something to investigate. It certainly
     /// doesn't modify it.
     all_current_lessons: Vec<GraphNode>,
     state: LessonEditFormState,
+}
+
+/// return true if id1 has id2 as a prereq somewhere.
+fn depends_on(id1: Id, id2: Id, all_lessons: &[GraphNode]) -> bool {
+    if id1 == id2 {
+        return true;
+    }
+
+    for &prereq_id in &all_lessons[id1 as usize].lesson.depends_on {
+        if depends_on(prereq_id, id2, all_lessons) {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub enum LessonEditFormAction {
@@ -45,12 +63,12 @@ pub enum LessonEditFormAction {
 
 impl LessonEditForm {
     pub fn new(
-        block_name: String,
+        form_type: FormType,
         lesson: LessonInfo,
         all_current_lessons: Vec<GraphNode>,
     ) -> Self {
         Self {
-            block_name,
+            form_type,
             name_input: TextInput::new(lesson.name),
             prerequisites: NodeListDisplay::new(
                 lesson
@@ -77,7 +95,14 @@ impl LessonEditForm {
                     self.state = LessonEditFormState::AddingPrereq(FuzzyFinder::new(
                         self.all_current_lessons
                             .iter()
-                            .filter(|node| !current_prereq_ids.contains(&node.lesson.get_id()))
+                            .filter(|node| {
+                                if let FormType::EditLesson(id) = self.form_type {
+                                    if depends_on(node.lesson.get_id(), id, &self.all_current_lessons){
+                                        return false;
+                                    }
+                                }
+                                !current_prereq_ids.contains(&node.lesson.get_id())
+                            })
                             .cloned()
                             .collect(),
                     ));
@@ -110,9 +135,16 @@ impl LessonEditForm {
         LessonEditFormAction::Noop
     }
 
+    fn block_name(&self) -> &str {
+        match self.form_type {
+            FormType::NewLesson => "Add New Lesson",
+            FormType::EditLesson(_) => "Edit Lesson",
+        }
+    }
+
     pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
         let main_block = Block::new()
-            .title(self.block_name.as_str())
+            .title(self.block_name())
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_style(Style::new().bold());

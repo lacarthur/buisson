@@ -1,10 +1,7 @@
 # TODO
 
-- add error handling to the IO code
-- add tests to the non-ui code
 - add more keybindings for the lesson form
 - add more help messages in the program
-- check for cycles when adding prerequisites to lesson
 
 - add way to remove prerequisites when editing lesson
 - add way to remove lessons

@@ -10,7 +10,7 @@ use ratatui::{
 use crate::{
     components::{
         fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
-        lesson_edit_form::{LessonEditForm, LessonEditFormAction},
+        lesson_edit_form::{FormType, LessonEditForm, LessonEditFormAction},
         node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle},
     },
     lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
@@ -252,7 +252,7 @@ impl App {
                 KeyCode::Char('q') => self.state = AppState::Quitting,
                 KeyCode::Char('a') => {
                     self.state = AppState::AddingNewLesson(LessonEditForm::new(
-                        "Add New Lesson".into(),
+                        FormType::NewLesson,
                         LessonInfo::default(),
                         self.lessons.lessons().cloned().collect(),
                     ))
@@ -265,7 +265,7 @@ impl App {
                 KeyCode::Char('e') => {
                     if let Some(currently_selected) = self.selected_node() {
                         let form = LessonEditForm::new(
-                            "Edit Lesson".into(),
+                            FormType::EditLesson(currently_selected.lesson.get_id()),
                             currently_selected.lesson.to_lesson_info(),
                             self.lessons.lessons().cloned().collect(),
                         );

@@ -96,7 +96,7 @@ impl IOBackend for SQLiteBackend {
 
     fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error> {
         self.connection.execute(
-            "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
+            "UPDATE lesson SET name = ?2, depends_on = ?3, status = ?4 WHERE id = ?1",
             (
                 &lesson.id,
                 &lesson.name,
@@ -354,6 +354,21 @@ impl<T: IOBackend> Graph<T> {
             .iter()
             .filter(|node| node.status == NodeStatus::Ok)
             .count()
+    }
+
+    /// return whether or not `id1` has `id2` as a prerequisite
+    pub fn depends_on(&self, id1: Id, id2: Id) -> bool {
+        if id1 == id2 {
+            return true;
+        }
+
+        for &prereq_id in &self.nodes[id1 as usize].lesson.depends_on {
+            if self.depends_on(prereq_id, id2) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
