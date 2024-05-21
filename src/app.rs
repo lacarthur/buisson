@@ -13,7 +13,7 @@ use crate::{
         lesson_edit_form::{LessonEditForm, LessonEditFormAction},
         node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle},
     },
-    lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus},
+    lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
     style_from_status,
 };
 
@@ -26,8 +26,15 @@ enum AppState {
     Quitting,
 }
 
+#[derive(Debug)]
+pub enum AppError {
+    IOError(std::io::Error),
+    SQLiteError(rusqlite::Error),
+    XDGError(xdg::BaseDirectoriesError),
+}
+
 pub struct App {
-    lessons: Graph,
+    lessons: Graph<SQLiteBackend>,
     /// The component that displays the list of lessons. It is not recomputed every frame, as that
     /// would make filtering the results expensive, as the filter would need to be recomputed every
     /// time. As it stands, `display_list` caches what needs to be displayed, and only updates it
@@ -37,13 +44,16 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> std::io::Result<Self> {
-        let directories = xdg::BaseDirectories::with_prefix("buisson")?;
+    pub fn new() -> Result<Self, AppError> {
+        let directories =
+            xdg::BaseDirectories::with_prefix("buisson").map_err(AppError::XDGError)?;
         let data_path = directories.get_data_home();
-        std::fs::create_dir_all(data_path)?;
+        std::fs::create_dir_all(data_path).map_err(AppError::IOError)?;
         let database_path = directories.get_data_home().join("lessons.sqlite");
 
-        let lessons = Graph::get_from_database(database_path).unwrap();
+        let backend = SQLiteBackend::open(&database_path).map_err(AppError::SQLiteError)?;
+
+        let lessons = Graph::get_from_database(backend).map_err(AppError::SQLiteError)?;
         let lesson_list_cache = lessons.lessons().cloned().collect();
 
         Ok(Self {

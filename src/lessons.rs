@@ -1,7 +1,4 @@
-use std::{
-    io::Cursor,
-    path::{Path, PathBuf},
-};
+use std::{io::Cursor, path::Path};
 
 use chrono::{Days, NaiveDate};
 use rusqlite::Connection;
@@ -17,6 +14,97 @@ fn days_from_level(level: u32) -> u64 {
         1 => 5,
         2 => 15,
         n => 2 * days_from_level(n - 1),
+    }
+}
+
+pub trait IOBackend {
+    type Error: std::fmt::Debug;
+    fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error>;
+
+    fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
+
+    fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
+}
+
+pub struct SQLiteBackend {
+    connection: rusqlite::Connection,
+}
+
+impl SQLiteBackend {
+    fn create_database(database_path: &Path) -> rusqlite::Result<Self> {
+        let connection = Connection::open(database_path)?;
+
+        connection.execute(
+            "CREATE TABLE lesson (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                depends_on BLOB,
+                status TEXT
+            )",
+            (),
+        )?;
+
+        Ok(Self { connection })
+    }
+
+    pub fn open(database_path: &Path) -> rusqlite::Result<Self> {
+        if std::fs::metadata(database_path).is_ok() {
+            let connection = Connection::open(database_path)?;
+
+            Ok(Self { connection })
+        } else {
+            Self::create_database(database_path)
+        }
+    }
+}
+
+impl IOBackend for SQLiteBackend {
+    type Error = rusqlite::Error;
+
+    fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error> {
+        let mut stmt = self
+            .connection
+            .prepare("SELECT id, name, depends_on, status FROM lesson")?;
+
+        let lessons = stmt
+            .query_map([], |row| {
+                let status_ron: String = row.get(3)?;
+                Ok(Lesson {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    depends_on: ids_from_bytes(&row.get(2)?),
+                    status: ron::from_str(&status_ron).unwrap(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(lessons)
+    }
+
+    fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error> {
+        self.connection.execute(
+            "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
+            (
+                &lesson.id,
+                &lesson.name,
+                &ids_to_bytes(&lesson.depends_on),
+                ron::to_string(&lesson.status).unwrap(),
+            ),
+        )?;
+        Ok(())
+    }
+
+    fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error> {
+        self.connection.execute(
+            "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
+            (
+                &lesson.id,
+                &lesson.name,
+                &ids_to_bytes(&lesson.depends_on),
+                ron::to_string(&lesson.status).unwrap(),
+            ),
+        )?;
+        Ok(())
     }
 }
 
@@ -137,17 +225,17 @@ pub struct GraphNode {
 /// The main data struct of the program. It stores all of the lessons. Right now, the nodes are
 /// indexed by the `id` of the lesson that they encapsulate, but this may change in the future.
 #[derive(Debug)]
-pub struct Graph {
+pub struct Graph<T: IOBackend> {
     nodes: Vec<GraphNode>,
     /// `children[id]` is the list of lessons that have lesson `id` as a prerequisite. This is kept
     /// in memory to help with updating the nodes at runtime. It is not stored to the disk and is
     /// instead computed at the start of the program
     children: Vec<Vec<Id>>,
-    /// the path to the database
-    path: PathBuf,
+
+    io_backend: T,
 }
 
-impl Graph {
+impl<T: IOBackend> Graph<T> {
     /// create a new node in the graph, and update the relevant data structures inside. This is a
     /// public facing function, and should be able to be called without altering the correctness of
     /// the state of `self`.
@@ -164,19 +252,7 @@ impl Graph {
         };
         let node_status = self.compute_node_status(&lesson.depends_on, &lesson.status);
 
-        let connection = Connection::open(&self.path).unwrap();
-
-        connection
-            .execute(
-                "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
-                (
-                    &id,
-                    &lesson.name,
-                    &ids_to_bytes(&lesson.depends_on),
-                    ron::to_string(&lesson.status).unwrap(),
-                ),
-            )
-            .unwrap();
+        self.io_backend.add_new_lesson(&lesson).unwrap();
 
         self.nodes.push(GraphNode {
             lesson,
@@ -213,18 +289,13 @@ impl Graph {
             self.children[parent as usize].push(id);
         }
 
-        let connection = Connection::open(&self.path).unwrap();
-
-        connection
-            .execute(
-                "UPDATE lesson SET name = ?1, depends_on = ?2, status = ?3 WHERE id = ?4",
-                (
-                    &lesson_info.name,
-                    &ids_to_bytes(&lesson_info.depends_on),
-                    ron::to_string(&lesson_info.status).unwrap(),
-                    id,
-                ),
-            )
+        self.io_backend
+            .update_existing_lesson(&Lesson {
+                id,
+                name: lesson_info.name.clone(),
+                depends_on: lesson_info.depends_on.clone(),
+                status: lesson_info.status.clone(),
+            })
             .unwrap();
 
         self.nodes[id as usize].lesson.name = lesson_info.name;
@@ -241,6 +312,9 @@ impl Graph {
 
     /// this function is called when the statuses of all the prereqs have been computed.
     fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> NodeStatus {
+        if let LessonStatus::GoodEnough = lesson_status {
+            return NodeStatus::Ok;
+        }
         let mut missing_prereqs = vec![];
         for &prereq_id in prereqs {
             if self.nodes[prereq_id as usize].status != NodeStatus::Ok {
@@ -258,8 +332,8 @@ impl Graph {
         }
     }
 
-    pub fn get_from_database(database_path: PathBuf) -> rusqlite::Result<Self> {
-        let builder = GraphBuilder::load_from_database(database_path)?;
+    pub fn get_from_database(backend: T) -> Result<Self, T::Error> {
+        let builder = GraphBuilder::load_from_database(backend)?;
         Ok(builder.into_graph())
     }
 
@@ -288,13 +362,13 @@ impl Graph {
 /// are computed and memoized. Finally, a `Graph` object is produced, when all the `Option`s are
 /// `Some`.
 #[derive(Debug, Default)]
-struct GraphBuilder {
+struct GraphBuilder<Backend: IOBackend> {
     lessons: Vec<(Lesson, Option<NodeStatus>)>,
-    path: PathBuf,
+    backend: Backend,
 }
 
-impl GraphBuilder {
-    fn into_graph(mut self) -> Graph {
+impl<Backend: IOBackend> GraphBuilder<Backend> {
+    fn into_graph(mut self) -> Graph<Backend> {
         self.resolve();
         let mut children = vec![vec![]; self.lessons.len()];
         for (lesson, _) in &self.lessons {
@@ -312,56 +386,16 @@ impl GraphBuilder {
                 })
                 .collect(),
             children,
-            path: self.path,
+            io_backend: self.backend,
         }
     }
 
-    fn create_database(database_path: &Path) -> rusqlite::Result<()> {
-        let db = Connection::open(database_path)?;
-
-        db.execute(
-            "CREATE TABLE lesson (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                depends_on BLOB,
-                status TEXT
-            )",
-            (),
-        )?;
-
-        Ok(())
-    }
-
-    fn load_from_database(database_path: PathBuf) -> rusqlite::Result<Self> {
-        if std::fs::metadata(&database_path).is_ok() {
-            let db = Connection::open(&database_path)?;
-
-            let mut stmt = db.prepare("SELECT id, name, depends_on, status FROM lesson")?;
-
-            let lessons = stmt
-                .query_map([], |row| {
-                    let status_ron: String = row.get(3)?;
-                    Ok(Lesson {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        depends_on: ids_from_bytes(&row.get(2)?),
-                        status: ron::from_str(&status_ron).unwrap(),
-                    })
-                })?
-                .map(|val| (val.unwrap(), None))
-                .collect::<Vec<_>>();
-
-            Ok(GraphBuilder {
-                lessons,
-                path: database_path,
-            })
-        } else {
-            Self::create_database(&database_path)?;
-            Ok(GraphBuilder {
-                lessons: vec![],
-                path: database_path,
-            })
-        }
+    fn load_from_database(backend: Backend) -> Result<Self, Backend::Error> {
+        let lessons = backend.query_lessons()?;
+        Ok(Self {
+            lessons: lessons.into_iter().map(|lesson| (lesson, None)).collect(),
+            backend,
+        })
     }
 
     /// this function is to be called recursivley, changing the stored status of the nodes as it
@@ -369,6 +403,11 @@ impl GraphBuilder {
     fn get_status(&mut self, id: Id) -> NodeStatus {
         if let Some(status) = &self.lessons[id as usize].1 {
             return status.clone();
+        }
+
+        if let LessonStatus::GoodEnough = self.lessons[id as usize].0.status {
+            self.lessons[id as usize].1 = Some(NodeStatus::Ok);
+            return NodeStatus::Ok;
         }
 
         let prereqs = self.lessons[id as usize].0.depends_on.clone();
@@ -398,5 +437,310 @@ impl GraphBuilder {
         for i in 0..self.lessons.len() {
             self.get_status(i as u64);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DummyIOBackend {
+        lessons: Vec<Lesson>,
+    }
+
+    impl IOBackend for DummyIOBackend {
+        type Error = ();
+
+        fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error> {
+            Ok(self.lessons.clone())
+        }
+
+        fn add_new_lesson(&self, _lesson: &Lesson) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn update_existing_lesson(&self, _lesson: &Lesson) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    fn test_dummy_backend() -> DummyIOBackend {
+        let lessons = vec![
+            Lesson {
+                id: 0,
+                name: String::from("Test 0"),
+                depends_on: vec![1],
+                status: LessonStatus::NotPracticed,
+            },
+            Lesson {
+                id: 1,
+                name: String::from("Test 1"),
+                depends_on: vec![],
+                status: LessonStatus::GoodEnough,
+            },
+            Lesson {
+                id: 2,
+                name: String::from("Test 2"),
+                depends_on: vec![1, 0, 3],
+                status: LessonStatus::GoodEnough,
+            },
+            Lesson {
+                id: 3,
+                name: String::from("Test 3"),
+                depends_on: vec![0],
+                status: LessonStatus::NotPracticed,
+            },
+            Lesson {
+                id: 4,
+                name: String::from("Test 4"),
+                depends_on: vec![2],
+                status: LessonStatus::NotPracticed,
+            },
+        ];
+
+        DummyIOBackend { lessons }
+    }
+
+    impl PartialEq for LessonStatus {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (
+                    Self::Practiced {
+                        level: l_level,
+                        date: l_date,
+                    },
+                    Self::Practiced {
+                        level: r_level,
+                        date: r_date,
+                    },
+                ) => l_level == r_level && l_date == r_date,
+                _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+            }
+        }
+    }
+
+    impl PartialEq for Lesson {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
+                && self.name == other.name
+                && self.depends_on == other.depends_on
+                && self.status == other.status
+        }
+    }
+
+    impl PartialEq for GraphNode {
+        fn eq(&self, other: &Self) -> bool {
+            self.lesson == other.lesson && self.status == other.status
+        }
+    }
+
+    #[test]
+    fn test_graph_creation() {
+        let backend = test_dummy_backend();
+
+        let g = Graph::get_from_database(backend).unwrap();
+
+        let nodes = vec![
+            GraphNode {
+                lesson: Lesson {
+                    id: 0,
+                    name: String::from("Test 0"),
+                    depends_on: vec![1],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 1,
+                    name: String::from("Test 1"),
+                    depends_on: vec![],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 2,
+                    name: String::from("Test 2"),
+                    depends_on: vec![1, 0, 3],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 3,
+                    name: String::from("Test 3"),
+                    depends_on: vec![0],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::MissingPrereq(vec![0]),
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 4,
+                    name: String::from("Test 4"),
+                    depends_on: vec![2],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+        ];
+
+        assert_eq!(g.nodes, nodes)
+    }
+
+    #[test]
+    fn test_node_adding() {
+        let backend = test_dummy_backend();
+
+        let mut g = Graph::get_from_database(backend).unwrap();
+
+        let nodes = vec![
+            GraphNode {
+                lesson: Lesson {
+                    id: 0,
+                    name: String::from("Test 0"),
+                    depends_on: vec![1],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 1,
+                    name: String::from("Test 1"),
+                    depends_on: vec![],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 2,
+                    name: String::from("Test 2"),
+                    depends_on: vec![1, 0, 3],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 3,
+                    name: String::from("Test 3"),
+                    depends_on: vec![0],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::MissingPrereq(vec![0]),
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 4,
+                    name: String::from("Test 4"),
+                    depends_on: vec![2],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 5,
+                    name: String::from("Test 5"),
+                    depends_on: vec![2],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 6,
+                    name: String::from("Test 6"),
+                    depends_on: vec![5, 2],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::MissingPrereq(vec![5]),
+            },
+        ];
+
+        g.create_new_node(LessonInfo {
+            name: String::from("Test 5"),
+            depends_on: vec![2],
+            status: LessonStatus::NotPracticed,
+        });
+
+        g.create_new_node(LessonInfo {
+            name: String::from("Test 6"),
+            depends_on: vec![5, 2],
+            status: LessonStatus::NotPracticed,
+        });
+
+        assert_eq!(g.nodes, nodes);
+    }
+
+    #[test]
+    fn test_node_editing() {
+        let backend = test_dummy_backend();
+
+        let mut g = Graph::get_from_database(backend).unwrap();
+
+        let nodes = vec![
+            GraphNode {
+                lesson: Lesson {
+                    id: 0,
+                    name: String::from("TEST 0"),
+                    depends_on: vec![],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 1,
+                    name: String::from("Test 1"),
+                    depends_on: vec![],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 2,
+                    name: String::from("Test 2"),
+                    depends_on: vec![1, 0, 3],
+                    status: LessonStatus::GoodEnough,
+                },
+                status: NodeStatus::Ok,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 3,
+                    name: String::from("Test 3"),
+                    depends_on: vec![0],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+            GraphNode {
+                lesson: Lesson {
+                    id: 4,
+                    name: String::from("Test 4"),
+                    depends_on: vec![2],
+                    status: LessonStatus::NotPracticed,
+                },
+                status: NodeStatus::Pending,
+            },
+        ];
+
+        g.edit_node(
+            0,
+            LessonInfo {
+                name: String::from("TEST 0"),
+                depends_on: vec![],
+                status: LessonStatus::GoodEnough,
+            },
+        );
+
+        assert_eq!(g.nodes, nodes);
     }
 }
