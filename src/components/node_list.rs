@@ -63,7 +63,7 @@ pub struct NodeListDisplay<NodeDisplayer: GraphNodeDisplayer + Default> {
     // in a refcell because rendering a list requires mutating the `ListState`, and I don't want
     // `render` to require a mutable reference.
     state: RefCell<ListState>,
-    displayer: NodeDisplayer,
+    pub displayer: NodeDisplayer,
 }
 
 impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {

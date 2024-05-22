@@ -2,14 +2,16 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
-    text::{Line, Text},
+    text::{Line, Span},
     widgets::{Block, Borders, ListItem},
     Frame,
 };
 
 use crate::{
-    components::node_list::{GraphNodeDisplayer, NodeListDisplay},
-    components::textinput::TextInput,
+    components::{
+        node_list::{GraphNodeDisplayer, NodeListDisplay},
+        textinput::TextInput,
+    },
     lessons::{GraphNode, Id},
     style_from_status,
 };
@@ -17,12 +19,35 @@ use crate::{
 use super::{node_list::NodeListStyle, textinput::TextInputStyle};
 
 #[derive(Default, Debug)]
-struct FuzzyFinderNodeDisplayer;
+struct FuzzyFinderNodeDisplayer {
+    search_string: String,
+}
 
 impl GraphNodeDisplayer for FuzzyFinderNodeDisplayer {
     fn render<'a>(&'a self, node: &'a GraphNode) -> ListItem<'_> {
-        let text = Text::from(node.lesson.name.as_str());
-        ListItem::new(text).style(style_from_status(&node.status))
+        let occurences = node.lesson.name.match_indices(&self.search_string);
+
+        let mut spans = vec![];
+        let mut prev = 0;
+
+        for (index, _) in occurences {
+            let span_not_match = Span::styled(
+                &node.lesson.name[prev..index],
+                style_from_status(&node.status),
+            );
+            spans.push(span_not_match);
+            let span_match = Span::styled(&self.search_string, Style::default().blue());
+            spans.push(span_match);
+            prev = index + self.search_string.len();
+        }
+
+        spans.push(Span::styled(
+            &node.lesson.name[prev..],
+            style_from_status(&node.status),
+        ));
+
+        let text = Line::from(spans);
+        ListItem::new(text)
     }
 }
 
@@ -77,7 +102,7 @@ impl FuzzyFinder {
         let block = Block::new()
             .title(Line::from("Search").alignment(Alignment::Center))
             .borders(Borders::ALL)
-            .style(if let FuzzyFinderState::TypingSearch = self.state {
+            .border_style(if let FuzzyFinderState::TypingSearch = self.state {
                 Style::default().bold()
             } else {
                 Style::default()
@@ -102,7 +127,7 @@ impl FuzzyFinder {
             Block::new()
                 .borders(Borders::ALL)
                 .title(Line::from("Results").alignment(Alignment::Center))
-                .style(if let FuzzyFinderState::NavigatingResults = self.state {
+                .border_style(if let FuzzyFinderState::NavigatingResults = self.state {
                     Style::default().bold()
                 } else {
                     Style::default()
@@ -120,6 +145,8 @@ impl FuzzyFinder {
                 KeyCode::Esc | KeyCode::Enter => self.state = FuzzyFinderState::NavigatingResults,
                 _ => {
                     self.search_bar.handle_key(key);
+                    self.display_list.displayer.search_string =
+                        self.search_bar.to_str().to_string();
                     self.display_list.update_nodes(
                         self.original_list
                             .iter()
@@ -130,7 +157,9 @@ impl FuzzyFinder {
                 }
             },
             FuzzyFinderState::NavigatingResults => match key.code {
-                KeyCode::Char('a') => self.state = FuzzyFinderState::TypingSearch,
+                KeyCode::Char('a') | KeyCode::Char('i') => {
+                    self.state = FuzzyFinderState::TypingSearch
+                }
                 KeyCode::Esc => return FuzzyFinderAction::Terminate(None),
                 KeyCode::Enter => {
                     return FuzzyFinderAction::Terminate(self.display_list.selected_id())
