@@ -164,10 +164,17 @@ impl App {
             .borders(Borders::ALL);
 
         let widget = Paragraph::new(text)
-            .block(block)
             .style(Style::new().white());
+        
+        let inner = block.inner(area);
 
-        frame.render_widget(widget, area);
+        let layout = Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(inner);
+
+        frame.render_widget(block, area);
+
+        frame.render_widget(widget, layout[0]);
+
+        frame.render_widget(Text::from("Type 'e' to edit this lesson"), layout[1]);
     }
 
     /// renders help to `area`. Things like keybindings, etc...

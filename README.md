@@ -1,8 +1,5 @@
 # TODO
 
-- add more help messages in the program
-- highlight search string in fuzzyfinder results
-
 - add way to remove prerequisites when editing lesson
 - add way to remove lessons
 - add way to mark lessons as studied
