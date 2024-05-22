@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -201,6 +201,7 @@ impl LessonEditForm {
             ])
             .split(layout[1]);
 
+            frame.render_widget(Clear, layout[1]);
             finder.render(layout[1], frame);
         }
     }

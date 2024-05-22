@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -128,6 +128,7 @@ impl App {
                 self.render_side_panel(right_panel_minus_bar, frame);
             }
             AppState::Searching(search_input) => {
+                frame.render_widget(Clear, fuzzy_finder_area);
                 self.render_help(right_panel_minus_bar, frame);
                 search_input.render(fuzzy_finder_area, frame);
             }
