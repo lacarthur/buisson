@@ -68,9 +68,14 @@ pub struct NodeListDisplay<NodeDisplayer: GraphNodeDisplayer + Default> {
 
 impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
     pub fn new(nodes: Vec<GraphNode>) -> Self {
+        let state = if nodes.is_empty() {
+            RefCell::new(ListState::default())
+        } else {
+            RefCell::new(ListState::default().with_selected(Some(0)))
+        };
         Self {
             nodes,
-            state: RefCell::new(ListState::default()),
+            state,
             displayer: NodeDisplayer::default(),
         }
     }
@@ -87,6 +92,8 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
             } else if index >= self.nodes.len() {
                 *self.state.borrow_mut() = ListState::default().with_selected(Some(index - 1));
             }
+        } else if !self.nodes.is_empty() {
+            *self.state.borrow_mut() = ListState::default().with_selected(Some(0));
         }
     }
 
@@ -134,10 +141,6 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
             .find(|(_, node)| node.lesson.get_id() == id)
             .map(|(list_index, _)| list_index);
         *self.state.borrow_mut() = ListState::default().with_selected(id);
-    }
-
-    pub fn select_first(&self) {
-        *self.state.borrow_mut() = ListState::default().with_selected(Some(0));
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) {

@@ -1,7 +1,6 @@
 # TODO
 
 - add more help messages in the program
-- remove generic node list widget.
 - highlight search string in fuzzyfinder results
 
 - add way to remove prerequisites when editing lesson
