@@ -341,8 +341,8 @@ impl<T: IOBackend> Graph<T> {
         self.nodes.iter()
     }
 
-    pub fn get(&self, id: usize) -> &GraphNode {
-        &self.nodes[id]
+    pub fn get(&self, id: Id) -> &GraphNode {
+        &self.nodes[id as usize]
     }
 
     pub fn num_nodes(&self) -> usize {

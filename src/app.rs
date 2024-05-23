@@ -11,7 +11,7 @@ use crate::{
     components::{
         fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
         lesson_edit_form::{FormType, LessonEditForm, LessonEditFormAction},
-        node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle},
+        node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle}, study_editor::{StudyEditor, StudyEditorAction},
     },
     lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
     style_from_status,
@@ -22,6 +22,7 @@ enum AppState {
     BrowsingLessons,
     AddingNewLesson(LessonEditForm),
     EditingLesson(Id, LessonEditForm),
+    Studying(Id, StudyEditor),
     Searching(FuzzyFinder),
     Quitting,
 }
@@ -132,6 +133,22 @@ impl App {
                 self.render_help(right_panel_minus_bar, frame);
                 search_input.render(fuzzy_finder_area, frame);
             }
+            AppState::Studying(_, study_editor) => {
+                let horizontal_area = Layout::horizontal(Constraint::from_percentages([30, 40, 30])).split(area)[1];
+                let top_padding = (horizontal_area.height - 5)/2;
+                let bottom_padding = horizontal_area.height - 5 - top_padding;
+                let vertical_area = Layout::vertical(Constraint::from_mins([top_padding, 5, bottom_padding])).split(horizontal_area)[1];
+
+                let block = Block::new().title("Study")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().bold());
+
+                let study_editor_area = block.inner(vertical_area);
+
+                frame.render_widget(Clear, vertical_area);
+                frame.render_widget(block, vertical_area);
+                study_editor.render(study_editor_area, frame);
+            }
         }
     }
 
@@ -150,7 +167,7 @@ impl App {
             Line::from(vec![Span::raw("Prerequisites: ")]),
         ];
         text.extend(node.lesson.depends_on.iter().map(|id| {
-            let prereq_node = self.lessons.get(*id as usize);
+            let prereq_node = self.lessons.get(*id);
             Line::from(vec![Span::styled(
                 &prereq_node.lesson.name,
                 style_from_status(&prereq_node.status),
@@ -225,7 +242,7 @@ impl App {
             .style(style);
 
         match self.state {
-            AppState::BrowsingLessons | AppState::EditingLesson(_, _) => {
+            AppState::BrowsingLessons | AppState::EditingLesson(_, _) | AppState::Studying(_, _) => {
                 self.display_list.render_with_style(
                     area,
                     frame,
@@ -247,7 +264,7 @@ impl App {
     fn selected_node(&self) -> Option<&GraphNode> {
         self.display_list
             .selected_id()
-            .map(|id| self.lessons.get(id as usize))
+            .map(|id| self.lessons.get(id))
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) {
@@ -281,6 +298,14 @@ impl App {
                             AppState::EditingLesson(currently_selected.lesson.get_id(), form);
                     }
                 }
+                KeyCode::Char('l') => {
+                    if let Some(node) = self.selected_node() {
+                        let id = node.lesson.get_id();
+                        let status = node.lesson.status.clone();
+
+                        self.state = AppState::Studying(id, StudyEditor::new(status));
+                    }
+                }
                 _ => self.display_list.handle_key(key),
             },
             AppState::AddingNewLesson(event_name) => match event_name.handle_key(key) {
@@ -307,6 +332,19 @@ impl App {
                     if let Some(id) = id {
                         self.display_list.select(id);
                     }
+                }
+            }
+            AppState::Studying(id, study_editor) => {
+                match study_editor.handle_key(key) {
+                    StudyEditorAction::Terminate(Some(lesson_status)) => {
+                        let name = self.lessons.get(*id).lesson.name.clone();
+                        let depends_on = self.lessons.get(*id).lesson.depends_on.clone();
+                        self.lessons.edit_node(*id, LessonInfo { name, depends_on, status: lesson_status });
+                        self.state = AppState::BrowsingLessons;
+                        self.update_cache(None);
+                    }
+                    StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
+                    StudyEditorAction::Noop => (),
                 }
             }
             AppState::Quitting => (),
