@@ -1,4 +1,5 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use rand::{rngs::ThreadRng, thread_rng};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
@@ -42,6 +43,7 @@ pub struct App {
     /// when relevant
     display_list: NodeListDisplay<BasicNodeDisplayer>,
     state: AppState,
+    rng: ThreadRng,
 }
 
 impl App {
@@ -61,6 +63,7 @@ impl App {
             lessons,
             display_list: NodeListDisplay::new(lesson_list_cache),
             state: AppState::BrowsingLessons,
+            rng: thread_rng(),
         })
     }
 
@@ -304,6 +307,11 @@ impl App {
                         let status = node.lesson.status.clone();
 
                         self.state = AppState::Studying(id, StudyEditor::new(status));
+                    }
+                }
+                KeyCode::Char('r') => {
+                    if let Some(node) = self.lessons.random_pending(&mut self.rng) {
+                        self.display_list.select(node.lesson.get_id());
                     }
                 }
                 _ => self.display_list.handle_key(key),

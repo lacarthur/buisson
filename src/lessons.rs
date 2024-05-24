@@ -1,6 +1,7 @@
 use std::{io::Cursor, path::Path};
 
 use chrono::{Days, NaiveDate};
+use rand::{seq::IteratorRandom, Rng};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -303,6 +304,11 @@ impl<T: IOBackend> Graph<T> {
         self.nodes[id as usize].lesson.status = lesson_info.status;
 
         self.update_lesson_status(id);
+    }
+
+    pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<&GraphNode> {
+        self.nodes.iter().filter(|node| matches!(node.status, NodeStatus::Pending))
+            .choose(rng)
     }
 
     pub fn perform_search(&self, search_request: String) -> impl Iterator<Item = &GraphNode> {
