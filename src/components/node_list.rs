@@ -90,7 +90,7 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
             if self.nodes.is_empty() {
                 *self.state.borrow_mut() = ListState::default();
             } else if index >= self.nodes.len() {
-                *self.state.borrow_mut() = ListState::default().with_selected(Some(index - 1));
+                *self.state.borrow_mut() = ListState::default().with_selected(Some(self.nodes.len() - 1));
             }
         } else if !self.nodes.is_empty() {
             *self.state.borrow_mut() = ListState::default().with_selected(Some(0));
