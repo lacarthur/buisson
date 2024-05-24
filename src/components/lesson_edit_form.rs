@@ -39,6 +39,7 @@ pub struct LessonEditForm {
     /// doesn't modify it.
     all_current_lessons: Vec<GraphNode>,
     state: LessonEditFormState,
+    lesson_status: LessonStatus,
 }
 
 /// return true if id1 has id2 as a prereq somewhere.
@@ -79,6 +80,7 @@ impl LessonEditForm {
             ),
             all_current_lessons,
             state: LessonEditFormState::EditingName,
+            lesson_status: lesson.status,
         }
     }
 
@@ -284,7 +286,7 @@ impl LessonEditForm {
         LessonInfo {
             name: self.name_input.to_str().into(),
             depends_on: self.prerequisites.get_all_ids(),
-            status: LessonStatus::NotPracticed,
+            status: self.lesson_status.clone(),
         }
     }
 }
