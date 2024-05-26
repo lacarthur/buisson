@@ -102,6 +102,10 @@ impl<NodeDisplayer: GraphNodeDisplayer> NodeListDisplay<NodeDisplayer> {
         self.nodes.push(node);
     }
 
+    pub fn remove_node_by_id(&mut self, id: Id) {
+        self.nodes.retain(|node| node.lesson.get_id() != id);
+    }
+
     /// return the `List` that will get rendered, styling the nodes according to `self.displayer`.
     fn get_list<'a>(&'a self, block: Option<Block<'a>>) -> List<'a> {
         let items = self.nodes.iter().map(|node| self.displayer.render(node));

@@ -127,6 +127,11 @@ impl LessonEditForm {
                 KeyCode::Char('k') if key.modifiers == KeyModifiers::ALT => {
                     self.state = LessonEditFormState::EditingName
                 }
+                KeyCode::Char('d') => {
+                    if let Some(id) = self.prerequisites.selected_id() {
+                        self.prerequisites.remove_node_by_id(id);
+                    }
+                }
                 _ => self.prerequisites.handle_key(key),
             },
             LessonEditFormState::AddingPrereq(finder) => match finder.handle_key(key) {
@@ -256,13 +261,13 @@ impl LessonEditForm {
     }
 
     fn render_prereq_list(&self, area: Rect, frame: &mut Frame<'_>) {
-        let style = match &self.state {
+        let title_style = match &self.state {
             LessonEditFormState::EditingName | LessonEditFormState::Validating => Style::default(),
             LessonEditFormState::NavigatingPrereqs | LessonEditFormState::AddingPrereq(_) => {
                 Style::default().bold()
             }
         };
-        let prereq = Line::from("Prerequisites").style(style);
+        let prereq = Line::from("Prerequisites").style(title_style);
         let help = Line::from("Type 'a' to add a prerequisite");
 
         let layout = Layout::vertical([
@@ -274,8 +279,14 @@ impl LessonEditForm {
 
         frame.render_widget(prereq, layout[0]);
 
+        let node_list_style = if let LessonEditFormState::NavigatingPrereqs = self.state {
+            NodeListStyle::default()
+        } else {
+            NodeListStyle::default().dont_display_selected()
+        };
+
         self.prerequisites
-            .render_with_style(layout[1], frame, NodeListStyle::default());
+            .render_with_style(layout[1], frame, node_list_style);
 
         if let LessonEditFormState::NavigatingPrereqs = self.state {
             frame.render_widget(help, layout[2]);
