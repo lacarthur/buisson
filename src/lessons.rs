@@ -1,4 +1,4 @@
-use std::{io::Cursor, path::Path};
+use std::{collections::HashMap, io::Cursor, path::Path};
 
 use chrono::{Days, NaiveDate};
 use rand::{seq::IteratorRandom, Rng};
@@ -20,7 +20,7 @@ fn days_from_level(level: u32) -> u64 {
 
 pub trait IOBackend {
     type Error: std::fmt::Debug;
-    fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error>;
+    fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error>;
 
     fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
 
@@ -62,7 +62,7 @@ impl SQLiteBackend {
 impl IOBackend for SQLiteBackend {
     type Error = rusqlite::Error;
 
-    fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error> {
+    fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error> {
         let mut stmt = self
             .connection
             .prepare("SELECT id, name, depends_on, status FROM lesson")?;
@@ -70,14 +70,14 @@ impl IOBackend for SQLiteBackend {
         let lessons = stmt
             .query_map([], |row| {
                 let status_ron: String = row.get(3)?;
-                Ok(Lesson {
+                Ok((row.get(0)?, Lesson {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     depends_on: ids_from_bytes(&row.get(2)?),
                     status: ron::from_str(&status_ron).unwrap(),
-                })
+                }))
             })?
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<HashMap<Id, Lesson>, _>>()?;
 
         Ok(lessons)
     }
@@ -227,11 +227,12 @@ pub struct GraphNode {
 /// indexed by the `id` of the lesson that they encapsulate, but this may change in the future.
 #[derive(Debug)]
 pub struct Graph<T: IOBackend> {
-    nodes: Vec<GraphNode>,
+    nodes: HashMap<Id, GraphNode>,
     /// `children[id]` is the list of lessons that have lesson `id` as a prerequisite. This is kept
     /// in memory to help with updating the nodes at runtime. It is not stored to the disk and is
     /// instead computed at the start of the program
-    children: Vec<Vec<Id>>,
+    children: HashMap<Id, Vec<Id>>,
+    next_id: Id,
 
     io_backend: T,
 }
@@ -241,9 +242,11 @@ impl<T: IOBackend> Graph<T> {
     /// public facing function, and should be able to be called without altering the correctness of
     /// the state of `self`.
     pub fn create_new_node(&mut self, lesson_info: LessonInfo) {
-        let id = self.nodes.len() as u64;
+        let id = self.next_id;
+        self.next_id += 1;
+
         for &parent in &lesson_info.depends_on {
-            self.children[parent as usize].push(id);
+            self.children.get_mut(&parent).unwrap().push(id);
         }
         let lesson = Lesson {
             id,
@@ -255,39 +258,39 @@ impl<T: IOBackend> Graph<T> {
 
         self.io_backend.add_new_lesson(&lesson).unwrap();
 
-        self.nodes.push(GraphNode {
+        self.children.insert(lesson.id, vec![]);
+        self.nodes.insert(lesson.id, GraphNode {
             lesson,
             status: node_status,
         });
-        self.children.push(vec![]);
     }
 
     /// this function is called when a node is edited. It is useful if a lesson has a new
     /// prerequisite, its status may need updating. It is only the runtime status though.
     fn update_lesson_status(&mut self, id: Id) {
-        let lesson_status = &self.nodes[id as usize].lesson.status;
-        let old_lesson_status = self.nodes[id as usize].status.clone();
+        let lesson_status = &self.nodes.get(&id).unwrap().lesson.status;
+        let old_lesson_status = self.nodes.get(&id).unwrap().status.clone();
 
         let new_lesson_status =
-            self.compute_node_status(&self.nodes[id as usize].lesson.depends_on, lesson_status);
+            self.compute_node_status(&self.nodes.get(&id).unwrap().lesson.depends_on, lesson_status);
 
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
         // function.
         if old_lesson_status != new_lesson_status {
-            self.nodes[id as usize].status = new_lesson_status;
-            for &child in &self.children[id as usize].clone() {
+            self.nodes.get_mut(&id).unwrap().status = new_lesson_status;
+            for &child in &self.children.get(&id).unwrap().clone() {
                 self.update_lesson_status(child);
             }
         }
     }
 
     pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) {
-        for &parent in &self.nodes[id as usize].lesson.depends_on {
-            self.children[parent as usize].retain(|&x| x != id);
+        for &parent in &self.nodes.get(&id).unwrap().lesson.depends_on {
+            self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
         for &parent in &lesson_info.depends_on {
-            self.children[parent as usize].push(id);
+            self.children.get_mut(&parent).unwrap().push(id);
         }
 
         self.io_backend
@@ -299,15 +302,15 @@ impl<T: IOBackend> Graph<T> {
             })
             .unwrap();
 
-        self.nodes[id as usize].lesson.name = lesson_info.name;
-        self.nodes[id as usize].lesson.depends_on = lesson_info.depends_on;
-        self.nodes[id as usize].lesson.status = lesson_info.status;
+        self.nodes.get_mut(&id).unwrap().lesson.name = lesson_info.name;
+        self.nodes.get_mut(&id).unwrap().lesson.depends_on = lesson_info.depends_on;
+        self.nodes.get_mut(&id).unwrap().lesson.status = lesson_info.status;
 
         self.update_lesson_status(id);
     }
 
     pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<&GraphNode> {
-        self.nodes.iter().filter(|node| matches!(node.status, NodeStatus::Pending))
+        self.nodes.values().filter(|node| matches!(node.status, NodeStatus::Pending))
             .choose(rng)
     }
 
@@ -323,7 +326,7 @@ impl<T: IOBackend> Graph<T> {
         }
         let mut missing_prereqs = vec![];
         for &prereq_id in prereqs {
-            if self.nodes[prereq_id as usize].status != NodeStatus::Ok {
+            if self.nodes.get(&prereq_id).unwrap().status != NodeStatus::Ok {
                 missing_prereqs.push(prereq_id);
             }
         }
@@ -344,11 +347,11 @@ impl<T: IOBackend> Graph<T> {
     }
 
     pub fn lessons(&self) -> impl Iterator<Item = &GraphNode> {
-        self.nodes.iter()
+        self.nodes.values()
     }
 
     pub fn get(&self, id: Id) -> &GraphNode {
-        &self.nodes[id as usize]
+        self.nodes.get(&id).unwrap()
     }
 
     pub fn num_nodes(&self) -> usize {
@@ -357,7 +360,7 @@ impl<T: IOBackend> Graph<T> {
 
     pub fn num_ok_nodes(&self) -> usize {
         self.nodes
-            .iter()
+            .values()
             .filter(|node| node.status == NodeStatus::Ok)
             .count()
     }
@@ -368,7 +371,7 @@ impl<T: IOBackend> Graph<T> {
             return true;
         }
 
-        for &prereq_id in &self.nodes[id1 as usize].lesson.depends_on {
+        for &prereq_id in &self.nodes.get(&id1).unwrap().lesson.depends_on {
             if self.depends_on(prereq_id, id2) {
                 return true;
             }
@@ -384,27 +387,33 @@ impl<T: IOBackend> Graph<T> {
 /// `Some`.
 #[derive(Debug, Default)]
 struct GraphBuilder<Backend: IOBackend> {
-    lessons: Vec<(Lesson, Option<NodeStatus>)>,
+    lessons: HashMap<Id, (Lesson, Option<NodeStatus>)>,
     backend: Backend,
 }
 
 impl<Backend: IOBackend> GraphBuilder<Backend> {
     fn into_graph(mut self) -> Graph<Backend> {
+        let mut max_id = 0;
         self.resolve();
-        let mut children = vec![vec![]; self.lessons.len()];
-        for (lesson, _) in &self.lessons {
+        let mut children = HashMap::new();
+        for (id, (lesson, _)) in &self.lessons {
+            max_id = std::cmp::max(max_id, *id);
             for &parent in &lesson.depends_on {
-                children[parent as usize].push(lesson.id);
+                children.entry(parent).and_modify(|list: &mut Vec<Id>| list.push(lesson.id)).or_insert(vec![lesson.id]);
             }
         }
+        
         Graph {
+            next_id: max_id + 1,
             nodes: self
                 .lessons
                 .into_iter()
-                .map(|(lesson, status)| GraphNode {
+                .map(|(id, (lesson, status))| 
+                    (id, 
+                    GraphNode {
                     lesson,
                     status: status.unwrap(),
-                })
+                }))
                 .collect(),
             children,
             io_backend: self.backend,
@@ -414,7 +423,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
     fn load_from_database(backend: Backend) -> Result<Self, Backend::Error> {
         let lessons = backend.query_lessons()?;
         Ok(Self {
-            lessons: lessons.into_iter().map(|lesson| (lesson, None)).collect(),
+            lessons: lessons.into_iter().map(|(id, lesson)| (id, (lesson, None))).collect(),
             backend,
         })
     }
@@ -422,16 +431,16 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
     /// this function is to be called recursivley, changing the stored status of the nodes as it
     /// computes it.
     fn get_status(&mut self, id: Id) -> NodeStatus {
-        if let Some(status) = &self.lessons[id as usize].1 {
+        if let Some(status) = &self.lessons.get(&id).unwrap().1 {
             return status.clone();
         }
 
-        if let LessonStatus::GoodEnough = self.lessons[id as usize].0.status {
-            self.lessons[id as usize].1 = Some(NodeStatus::Ok);
+        if let LessonStatus::GoodEnough = self.lessons.get(&id).unwrap().0.status {
+            self.lessons.get_mut(&id).unwrap().1 = Some(NodeStatus::Ok);
             return NodeStatus::Ok;
         }
 
-        let prereqs = self.lessons[id as usize].0.depends_on.clone();
+        let prereqs = self.lessons.get(&id).unwrap().0.depends_on.clone();
         let mut missing_prereqs = vec![];
         for prereq_id in prereqs {
             if self.get_status(prereq_id) != NodeStatus::Ok {
@@ -439,7 +448,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             }
         }
         let status = if missing_prereqs.is_empty() {
-            if self.lessons[id as usize].0.status.needs_work() {
+            if self.lessons.get(&id).unwrap().0.status.needs_work() {
                 NodeStatus::Pending
             } else {
                 NodeStatus::Ok
@@ -448,7 +457,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             NodeStatus::MissingPrereq(missing_prereqs)
         };
 
-        self.lessons[id as usize].1 = Some(status.clone());
+        self.lessons.get_mut(&id).unwrap().1 = Some(status.clone());
 
         status
     }
@@ -466,13 +475,13 @@ mod tests {
     use super::*;
 
     struct DummyIOBackend {
-        lessons: Vec<Lesson>,
+        lessons: HashMap<Id, Lesson>,
     }
 
     impl IOBackend for DummyIOBackend {
         type Error = ();
 
-        fn query_lessons(&self) -> Result<Vec<Lesson>, Self::Error> {
+        fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error> {
             Ok(self.lessons.clone())
         }
 
@@ -486,7 +495,7 @@ mod tests {
     }
 
     fn test_dummy_backend() -> DummyIOBackend {
-        let lessons = vec![
+        let lessons_vec = vec![
             Lesson {
                 id: 0,
                 name: String::from("Test 0"),
@@ -518,6 +527,8 @@ mod tests {
                 status: LessonStatus::NotPracticed,
             },
         ];
+
+        let lessons = lessons_vec.into_iter().map(|lesson| (lesson.id, lesson)).collect();
 
         DummyIOBackend { lessons }
     }
@@ -609,6 +620,8 @@ mod tests {
             },
         ];
 
+        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
+
         assert_eq!(g.nodes, nodes)
     }
 
@@ -696,6 +709,8 @@ mod tests {
             status: LessonStatus::NotPracticed,
         });
 
+        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
+
         assert_eq!(g.nodes, nodes);
     }
 
@@ -761,6 +776,8 @@ mod tests {
                 status: LessonStatus::GoodEnough,
             },
         );
+
+        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
 
         assert_eq!(g.nodes, nodes);
     }
