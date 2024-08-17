@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::Cursor, path::Path};
 
 use chrono::{Days, NaiveDate};
+use cli_log::debug;
 use rand::{seq::IteratorRandom, Rng};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ impl IOBackend for SQLiteBackend {
                 Ok((row.get(0)?, Lesson {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    depends_on: ids_from_bytes(&row.get(2)?),
+                    direct_prerequisites: ids_from_bytes(&row.get(2)?),
                     status: ron::from_str(&status_ron).unwrap(),
                 }))
             })?
@@ -88,7 +89,7 @@ impl IOBackend for SQLiteBackend {
             (
                 &lesson.id,
                 &lesson.name,
-                &ids_to_bytes(&lesson.depends_on),
+                &ids_to_bytes(&lesson.direct_prerequisites),
                 ron::to_string(&lesson.status).unwrap(),
             ),
         )?;
@@ -101,7 +102,7 @@ impl IOBackend for SQLiteBackend {
             (
                 &lesson.id,
                 &lesson.name,
-                &ids_to_bytes(&lesson.depends_on),
+                &ids_to_bytes(&lesson.direct_prerequisites),
                 ron::to_string(&lesson.status).unwrap(),
             ),
         )?;
@@ -110,7 +111,7 @@ impl IOBackend for SQLiteBackend {
 }
 
 /// The status of a lesson, independant of the runtime
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum LessonStatus {
     /// This lesson has never been practiced
     #[default]
@@ -162,12 +163,16 @@ pub enum NodeStatus {
 pub struct LessonInfo {
     pub name: String,
     /// The list of all prerequisite lessons, identified by their `id`.
-    pub depends_on: Vec<Id>,
+    pub direct_prerequisites: Vec<Id>,
     pub status: LessonStatus,
 }
 
 /// A lesson, meant to be serialized/deserialized, and storing informations that are independant of
 /// runtime.
+/// TODO: do we actually need to make this public? it seems like storing the lessoninfo in a
+/// HashMap with the Id as a key is enough. Unless somehow we need to figure out the Id from the
+/// lessoninfo? I can't think of a scenario where that's necessary. If we make this private, we
+/// might rename it to SerializableLesson or something, so that the use is clearer.
 #[derive(Debug, Clone)]
 pub struct Lesson {
     /// A unique `Id`, used to identify this lessson as a prerequisite of other lessons if
@@ -175,7 +180,7 @@ pub struct Lesson {
     id: Id,
     pub name: String,
     /// The list of all prerequisite lessons, identified by their `id`.
-    pub depends_on: Vec<Id>,
+    pub direct_prerequisites: Vec<Id>,
     pub status: LessonStatus,
 }
 
@@ -209,8 +214,8 @@ impl Lesson {
     pub fn to_lesson_info(&self) -> LessonInfo {
         LessonInfo {
             name: self.name.clone(),
-            depends_on: self.depends_on.clone(),
-            status: self.status.clone(),
+            direct_prerequisites: self.direct_prerequisites.clone(),
+            status: self.status,
         }
     }
 }
@@ -240,21 +245,22 @@ pub struct Graph<T: IOBackend> {
 impl<T: IOBackend> Graph<T> {
     /// create a new node in the graph, and update the relevant data structures inside. This is a
     /// public facing function, and should be able to be called without altering the correctness of
-    /// the state of `self`.
-    pub fn create_new_node(&mut self, lesson_info: LessonInfo) {
+    /// the state of `self`. It also returns the Id of the newly created node.
+    pub fn create_new_node(&mut self, lesson_info: LessonInfo) -> Id {
+        debug!("Creating node for {:?}", lesson_info);
         let id = self.next_id;
         self.next_id += 1;
 
-        for &parent in &lesson_info.depends_on {
+        for &parent in &lesson_info.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().push(id);
         }
         let lesson = Lesson {
             id,
             name: lesson_info.name,
-            depends_on: lesson_info.depends_on,
+            direct_prerequisites: lesson_info.direct_prerequisites,
             status: lesson_info.status,
         };
-        let node_status = self.compute_node_status(&lesson.depends_on, &lesson.status);
+        let node_status = self.compute_node_status(&lesson.direct_prerequisites, &lesson.status);
 
         self.io_backend.add_new_lesson(&lesson).unwrap();
 
@@ -263,33 +269,42 @@ impl<T: IOBackend> Graph<T> {
             lesson,
             status: node_status,
         });
+
+        debug!("End node creation, with Id {}", id);
+        id
     }
 
     /// this function is called when a node is edited. It is useful if a lesson has a new
     /// prerequisite, its status may need updating. It is only the runtime status though.
     fn update_lesson_status(&mut self, id: Id) {
+        debug!("Updating status of node {}", id);
         let lesson_status = &self.nodes.get(&id).unwrap().lesson.status;
         let old_lesson_status = self.nodes.get(&id).unwrap().status.clone();
 
         let new_lesson_status =
-            self.compute_node_status(&self.nodes.get(&id).unwrap().lesson.depends_on, lesson_status);
+            self.compute_node_status(&self.nodes.get(&id).unwrap().lesson.direct_prerequisites, lesson_status);
 
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
         // function.
         if old_lesson_status != new_lesson_status {
             self.nodes.get_mut(&id).unwrap().status = new_lesson_status;
+            debug!("Children: {:?}", &self.children);
             for &child in &self.children.get(&id).unwrap().clone() {
                 self.update_lesson_status(child);
             }
         }
+        debug!("End update for node {}", id);
     }
 
     pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) {
-        for &parent in &self.nodes.get(&id).unwrap().lesson.depends_on {
+        // for a simple update of the parents/children relationship, we just wipe the slate clean
+        // and then we rewrite everything with the updated values
+        debug!("editing node with Id {} and lesson_info {:?}", id, lesson_info);
+        for &parent in &self.nodes.get(&id).unwrap().lesson.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
-        for &parent in &lesson_info.depends_on {
+        for &parent in &lesson_info.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().push(id);
         }
 
@@ -297,16 +312,17 @@ impl<T: IOBackend> Graph<T> {
             .update_existing_lesson(&Lesson {
                 id,
                 name: lesson_info.name.clone(),
-                depends_on: lesson_info.depends_on.clone(),
-                status: lesson_info.status.clone(),
+                direct_prerequisites: lesson_info.direct_prerequisites.clone(),
+                status: lesson_info.status,
             })
             .unwrap();
 
         self.nodes.get_mut(&id).unwrap().lesson.name = lesson_info.name;
-        self.nodes.get_mut(&id).unwrap().lesson.depends_on = lesson_info.depends_on;
+        self.nodes.get_mut(&id).unwrap().lesson.direct_prerequisites = lesson_info.direct_prerequisites;
         self.nodes.get_mut(&id).unwrap().lesson.status = lesson_info.status;
 
         self.update_lesson_status(id);
+        debug!("End edit for node {}", id);
     }
 
     pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<&GraphNode> {
@@ -315,7 +331,7 @@ impl<T: IOBackend> Graph<T> {
     }
 
     pub fn perform_search(&self, search_request: String) -> impl Iterator<Item = &GraphNode> {
-        self.lessons()
+        self.lessons_iter()
             .filter(move |&node| node.lesson.name.contains(&search_request))
     }
 
@@ -343,11 +359,17 @@ impl<T: IOBackend> Graph<T> {
 
     pub fn get_from_database(backend: T) -> Result<Self, T::Error> {
         let builder = GraphBuilder::load_from_database(backend)?;
-        Ok(builder.into_graph())
+        let ret = builder.into_graph();
+        debug!("Initial children: {:?}", &ret.children);
+        Ok(ret)
     }
 
-    pub fn lessons(&self) -> impl Iterator<Item = &GraphNode> {
+    pub fn lessons_iter(&self) -> impl Iterator<Item = &GraphNode> {
         self.nodes.values()
+    }
+
+    pub fn lessons(&self) -> &HashMap<Id, GraphNode> {
+        &self.nodes
     }
 
     pub fn get(&self, id: Id) -> &GraphNode {
@@ -365,13 +387,13 @@ impl<T: IOBackend> Graph<T> {
             .count()
     }
 
-    /// return whether or not `id1` has `id2` as a prerequisite
+    /// return whether or not `id1` has `id2` as a prerequisite (not necessarily direct)
     pub fn depends_on(&self, id1: Id, id2: Id) -> bool {
         if id1 == id2 {
             return true;
         }
 
-        for &prereq_id in &self.nodes.get(&id1).unwrap().lesson.depends_on {
+        for &prereq_id in &self.nodes.get(&id1).unwrap().lesson.direct_prerequisites {
             if self.depends_on(prereq_id, id2) {
                 return true;
             }
@@ -396,9 +418,15 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
         let mut max_id = 0;
         self.resolve();
         let mut children = HashMap::new();
+        // we do this so that lessons that don't have any children still have an empty vec instead
+        // of no entry, which would cause a panic down the road
+        for &id in self.lessons.keys() {
+            children.insert(id, vec![]);
+        }
         for (id, (lesson, _)) in &self.lessons {
             max_id = std::cmp::max(max_id, *id);
-            for &parent in &lesson.depends_on {
+            for &parent in &lesson.direct_prerequisites {
+                // technically we dont need the or_insert, but ill keep it out of laziness.
                 children.entry(parent).and_modify(|list: &mut Vec<Id>| list.push(lesson.id)).or_insert(vec![lesson.id]);
             }
         }
@@ -440,7 +468,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             return NodeStatus::Ok;
         }
 
-        let prereqs = self.lessons.get(&id).unwrap().0.depends_on.clone();
+        let prereqs = self.lessons.get(&id).unwrap().0.direct_prerequisites.clone();
         let mut missing_prereqs = vec![];
         for prereq_id in prereqs {
             if self.get_status(prereq_id) != NodeStatus::Ok {
@@ -499,31 +527,31 @@ mod tests {
             Lesson {
                 id: 0,
                 name: String::from("Test 0"),
-                depends_on: vec![1],
+                direct_prerequisites: vec![1],
                 status: LessonStatus::NotPracticed,
             },
             Lesson {
                 id: 1,
                 name: String::from("Test 1"),
-                depends_on: vec![],
+                direct_prerequisites: vec![],
                 status: LessonStatus::GoodEnough,
             },
             Lesson {
                 id: 2,
                 name: String::from("Test 2"),
-                depends_on: vec![1, 0, 3],
+                direct_prerequisites: vec![1, 0, 3],
                 status: LessonStatus::GoodEnough,
             },
             Lesson {
                 id: 3,
                 name: String::from("Test 3"),
-                depends_on: vec![0],
+                direct_prerequisites: vec![0],
                 status: LessonStatus::NotPracticed,
             },
             Lesson {
                 id: 4,
                 name: String::from("Test 4"),
-                depends_on: vec![2],
+                direct_prerequisites: vec![2],
                 status: LessonStatus::NotPracticed,
             },
         ];
@@ -555,7 +583,7 @@ mod tests {
         fn eq(&self, other: &Self) -> bool {
             self.id == other.id
                 && self.name == other.name
-                && self.depends_on == other.depends_on
+                && self.direct_prerequisites == other.direct_prerequisites
                 && self.status == other.status
         }
     }
@@ -577,7 +605,7 @@ mod tests {
                 lesson: Lesson {
                     id: 0,
                     name: String::from("Test 0"),
-                    depends_on: vec![1],
+                    direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -586,7 +614,7 @@ mod tests {
                 lesson: Lesson {
                     id: 1,
                     name: String::from("Test 1"),
-                    depends_on: vec![],
+                    direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -595,7 +623,7 @@ mod tests {
                 lesson: Lesson {
                     id: 2,
                     name: String::from("Test 2"),
-                    depends_on: vec![1, 0, 3],
+                    direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -604,7 +632,7 @@ mod tests {
                 lesson: Lesson {
                     id: 3,
                     name: String::from("Test 3"),
-                    depends_on: vec![0],
+                    direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::MissingPrereq(vec![0]),
@@ -613,7 +641,7 @@ mod tests {
                 lesson: Lesson {
                     id: 4,
                     name: String::from("Test 4"),
-                    depends_on: vec![2],
+                    direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -636,7 +664,7 @@ mod tests {
                 lesson: Lesson {
                     id: 0,
                     name: String::from("Test 0"),
-                    depends_on: vec![1],
+                    direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -645,7 +673,7 @@ mod tests {
                 lesson: Lesson {
                     id: 1,
                     name: String::from("Test 1"),
-                    depends_on: vec![],
+                    direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -654,7 +682,7 @@ mod tests {
                 lesson: Lesson {
                     id: 2,
                     name: String::from("Test 2"),
-                    depends_on: vec![1, 0, 3],
+                    direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -663,7 +691,7 @@ mod tests {
                 lesson: Lesson {
                     id: 3,
                     name: String::from("Test 3"),
-                    depends_on: vec![0],
+                    direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::MissingPrereq(vec![0]),
@@ -672,7 +700,7 @@ mod tests {
                 lesson: Lesson {
                     id: 4,
                     name: String::from("Test 4"),
-                    depends_on: vec![2],
+                    direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -681,7 +709,7 @@ mod tests {
                 lesson: Lesson {
                     id: 5,
                     name: String::from("Test 5"),
-                    depends_on: vec![2],
+                    direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -690,7 +718,7 @@ mod tests {
                 lesson: Lesson {
                     id: 6,
                     name: String::from("Test 6"),
-                    depends_on: vec![5, 2],
+                    direct_prerequisites: vec![5, 2],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::MissingPrereq(vec![5]),
@@ -699,13 +727,13 @@ mod tests {
 
         g.create_new_node(LessonInfo {
             name: String::from("Test 5"),
-            depends_on: vec![2],
+            direct_prerequisites: vec![2],
             status: LessonStatus::NotPracticed,
         });
 
         g.create_new_node(LessonInfo {
             name: String::from("Test 6"),
-            depends_on: vec![5, 2],
+            direct_prerequisites: vec![5, 2],
             status: LessonStatus::NotPracticed,
         });
 
@@ -725,7 +753,7 @@ mod tests {
                 lesson: Lesson {
                     id: 0,
                     name: String::from("TEST 0"),
-                    depends_on: vec![],
+                    direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -734,7 +762,7 @@ mod tests {
                 lesson: Lesson {
                     id: 1,
                     name: String::from("Test 1"),
-                    depends_on: vec![],
+                    direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -743,7 +771,7 @@ mod tests {
                 lesson: Lesson {
                     id: 2,
                     name: String::from("Test 2"),
-                    depends_on: vec![1, 0, 3],
+                    direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
                 },
                 status: NodeStatus::Ok,
@@ -752,7 +780,7 @@ mod tests {
                 lesson: Lesson {
                     id: 3,
                     name: String::from("Test 3"),
-                    depends_on: vec![0],
+                    direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -761,7 +789,7 @@ mod tests {
                 lesson: Lesson {
                     id: 4,
                     name: String::from("Test 4"),
-                    depends_on: vec![2],
+                    direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
                 },
                 status: NodeStatus::Pending,
@@ -772,7 +800,7 @@ mod tests {
             0,
             LessonInfo {
                 name: String::from("TEST 0"),
-                depends_on: vec![],
+                direct_prerequisites: vec![],
                 status: LessonStatus::GoodEnough,
             },
         );

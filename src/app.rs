@@ -1,18 +1,18 @@
+use std::collections::HashMap;
+
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use rand::{rngs::ThreadRng, thread_rng};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 
 use crate::{
     components::{
-        fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
-        lesson_edit_form::{FormType, LessonEditForm, LessonEditFormAction},
-        node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle}, study_editor::{StudyEditor, StudyEditorAction},
+        fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, lesson_edit_form::{LessonEditForm, LessonEditFormAction}, node_list::NodeList, study_editor::{StudyEditor, StudyEditorAction}
     },
     lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
     style_from_status,
@@ -35,15 +35,17 @@ pub enum AppError {
     XDGError(xdg::BaseDirectoriesError),
 }
 
+
 pub struct App {
     lessons: Graph<SQLiteBackend>,
-    /// The component that displays the list of lessons. It is not recomputed every frame, as that
-    /// would make filtering the results expensive, as the filter would need to be recomputed every
-    /// time. As it stands, `display_list` caches what needs to be displayed, and only updates it
-    /// when relevant
-    display_list: NodeListDisplay<BasicNodeDisplayer>,
+    main_list: NodeList,
     state: AppState,
     rng: ThreadRng,
+}
+
+#[derive(Debug, Clone)]
+pub struct Context<'a> {
+    pub lessons: &'a HashMap<Id, GraphNode>,
 }
 
 impl App {
@@ -57,30 +59,19 @@ impl App {
         let backend = SQLiteBackend::open(&database_path).map_err(AppError::SQLiteError)?;
 
         let lessons = Graph::get_from_database(backend).map_err(AppError::SQLiteError)?;
-        let lesson_list_cache = lessons.lessons().cloned().collect();
+        let lesson_ids = lessons.lessons_iter().map(|node| node.lesson.get_id()).collect();
 
         Ok(Self {
             lessons,
-            display_list: NodeListDisplay::new(lesson_list_cache),
+            main_list: NodeList::new(lesson_ids),
             state: AppState::BrowsingLessons,
             rng: thread_rng(),
         })
     }
 
-    /// This function updates the cache of the lesson list to be displayed. Right now, it is only
-    /// called when adding/updating a lesson, and so search_request is always `None`. But if
-    /// filtering is added, this could become more useful.
-    fn update_cache(&mut self, search_request: Option<String>) {
-        match search_request {
-            Some(search_request) => self.display_list.update_nodes(
-                self.lessons
-                    .perform_search(search_request)
-                    .cloned()
-                    .collect(),
-            ),
-            None => self
-                .display_list
-                .update_nodes(self.lessons.lessons().cloned().collect()),
+    fn get_context(&self) -> Context<'_> {
+        Context {
+            lessons: self.lessons.lessons()
         }
     }
 
@@ -89,18 +80,19 @@ impl App {
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
-        let layout = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+        let main_layout = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(area);
-        let layout2 =
-            Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(layout[1]);
-        let layout3 =
-            Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(layout[0]);
+        let left_panel = main_layout[0];
+        let right_panel = main_layout[1];
 
-        let _left_panel = layout[0];
-        let left_panel_minus_bar = layout3[0];
-        let _right_panel = layout[1];
-        let right_panel_minus_bar = layout2[0];
-        let bottom_bar = layout3[1];
+        let right_panel_layout =
+            Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(right_panel);
+        let left_panel_layout =
+            Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(left_panel);
+
+        let left_panel_minus_bar = left_panel_layout[0];
+        let right_panel_minus_bar = right_panel_layout[0];
+        let bottom_bar = left_panel_layout[1];
 
         let layout = Layout::vertical([
             Constraint::Percentage(15),
@@ -123,10 +115,10 @@ impl App {
         match &self.state {
             AppState::Quitting => (),
             AppState::AddingNewLesson(lesson) => {
-                lesson.render(right_panel_minus_bar, frame);
+                lesson.render(self.get_context(), right_panel_minus_bar, frame);
             }
             AppState::EditingLesson(_, lesson) => {
-                lesson.render(right_panel_minus_bar, frame);
+                lesson.render(self.get_context(),right_panel_minus_bar, frame);
             }
             AppState::BrowsingLessons => {
                 self.render_side_panel(right_panel_minus_bar, frame);
@@ -134,7 +126,7 @@ impl App {
             AppState::Searching(search_input) => {
                 frame.render_widget(Clear, fuzzy_finder_area);
                 self.render_help(right_panel_minus_bar, frame);
-                search_input.render(fuzzy_finder_area, frame);
+                search_input.render(self.get_context(), fuzzy_finder_area, frame);
             }
             AppState::Studying(_, study_editor) => {
                 let horizontal_area = Layout::horizontal(Constraint::from_percentages([30, 40, 30])).split(area)[1];
@@ -169,7 +161,8 @@ impl App {
             Line::default(),
             Line::from(vec![Span::raw("Prerequisites: ")]),
         ];
-        text.extend(node.lesson.depends_on.iter().map(|id| {
+
+        text.extend(node.lesson.direct_prerequisites.iter().map(|id| {
             let prereq_node = self.lessons.get(*id);
             Line::from(vec![Span::styled(
                 &prereq_node.lesson.name,
@@ -213,8 +206,8 @@ impl App {
     }
 
     fn render_side_panel(&self, area: Rect, frame: &mut Frame<'_>) {
-        if let Some(node) = self.selected_node() {
-            self.render_node_display(area, frame, node);
+        if let Some(id) = self.main_list.currently_selected_id() {
+            self.render_node_display(area, frame, self.lessons.get(id));
         } else {
             self.render_help(area, frame);
         }
@@ -235,91 +228,54 @@ impl App {
     }
 
     fn render_lessons_list(&self, area: Rect, frame: &mut Frame<'_>) {
-        let style = match &self.state {
+        let border_style = match &self.state {
             AppState::BrowsingLessons | AppState::Searching(_) => Style::default().bold(),
             _ => Style::default(),
         };
         let block = Block::new()
             .title(Line::from("Lessons").alignment(Alignment::Center))
             .borders(Borders::ALL)
-            .style(style);
+            .style(border_style);
+
+        let list_widget= List::new(self.main_list.ids().iter()
+            .map(|id| {
+                let node = self.lessons.get(*id);
+                let text = Text::from(node.lesson.name.as_str());
+                ListItem::new(text).style(style_from_status(&node.status))
+            })
+        ).block(block)
+        .highlight_style(Style::default().reversed());
 
         match self.state {
             AppState::BrowsingLessons | AppState::EditingLesson(_, _) | AppState::Studying(_, _) => {
-                self.display_list.render_with_style(
-                    area,
-                    frame,
-                    NodeListStyle::default().block(block),
-                );
+                frame.render_stateful_widget(list_widget, area, &mut self.main_list.list_state_refcell().borrow_mut());
             }
             _ => {
-                self.display_list.render_with_style(
-                    area,
-                    frame,
-                    NodeListStyle::default()
-                        .block(block)
-                        .dont_display_selected(),
-                );
+                frame.render_widget(list_widget, area);
             }
         }
     }
 
-    fn selected_node(&self) -> Option<&GraphNode> {
-        self.display_list
-            .selected_id()
-            .map(|id| self.lessons.get(id))
+    pub fn handle_event(&mut self, event: &Event) {
+        if let Event::Key(key) = event {
+            self.handle_key(key);
+        }
     }
+}
 
+// input handling code
+impl App {
     pub fn handle_key(&mut self, key: &KeyEvent) {
         if key.kind != KeyEventKind::Press {
             return;
         }
 
         match &mut self.state {
-            AppState::BrowsingLessons => match key.code {
-                KeyCode::Char('q') => self.state = AppState::Quitting,
-                KeyCode::Char('a') => {
-                    self.state = AppState::AddingNewLesson(LessonEditForm::new(
-                        FormType::NewLesson,
-                        LessonInfo::default(),
-                        self.lessons.lessons().cloned().collect(),
-                    ))
-                }
-                KeyCode::Char('s') => {
-                    self.state = AppState::Searching(FuzzyFinder::new(
-                        self.lessons.lessons().cloned().collect(),
-                    ))
-                }
-                KeyCode::Char('e') => {
-                    if let Some(currently_selected) = self.selected_node() {
-                        let form = LessonEditForm::new(
-                            FormType::EditLesson(currently_selected.lesson.get_id()),
-                            currently_selected.lesson.to_lesson_info(),
-                            self.lessons.lessons().cloned().collect(),
-                        );
-                        self.state =
-                            AppState::EditingLesson(currently_selected.lesson.get_id(), form);
-                    }
-                }
-                KeyCode::Char('l') => {
-                    if let Some(node) = self.selected_node() {
-                        let id = node.lesson.get_id();
-                        let status = node.lesson.status.clone();
-
-                        self.state = AppState::Studying(id, StudyEditor::new(status));
-                    }
-                }
-                KeyCode::Char('r') => {
-                    if let Some(node) = self.lessons.random_pending(&mut self.rng) {
-                        self.display_list.select(node.lesson.get_id());
-                    }
-                }
-                _ => self.display_list.handle_key(key),
-            },
+            AppState::BrowsingLessons => self.handle_key_browsing(key),
             AppState::AddingNewLesson(event_name) => match event_name.handle_key(key) {
                 LessonEditFormAction::Terminate(Some(lesson_info)) => {
-                    self.lessons.create_new_node(lesson_info);
-                    self.update_cache(None);
+                    let id = self.lessons.create_new_node(lesson_info);
+                    self.main_list.push(id);
                     self.state = AppState::BrowsingLessons;
                 }
                 LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
@@ -328,7 +284,6 @@ impl App {
             AppState::EditingLesson(id, lesson) => match lesson.handle_key(key) {
                 LessonEditFormAction::Terminate(Some(lesson_info)) => {
                     self.lessons.edit_node(*id, lesson_info);
-                    self.update_cache(None);
                     self.state = AppState::BrowsingLessons;
                 }
                 LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
@@ -338,7 +293,7 @@ impl App {
                 if let FuzzyFinderAction::Terminate(id) = finder.handle_key(key) {
                     self.state = AppState::BrowsingLessons;
                     if let Some(id) = id {
-                        self.display_list.select(id);
+                        self.main_list.select(id);
                     }
                 }
             }
@@ -346,10 +301,9 @@ impl App {
                 match study_editor.handle_key(key) {
                     StudyEditorAction::Terminate(Some(lesson_status)) => {
                         let name = self.lessons.get(*id).lesson.name.clone();
-                        let depends_on = self.lessons.get(*id).lesson.depends_on.clone();
-                        self.lessons.edit_node(*id, LessonInfo { name, depends_on, status: lesson_status });
+                        let direct_prerequisites = self.lessons.get(*id).lesson.direct_prerequisites.clone();
+                        self.lessons.edit_node(*id, LessonInfo { name, direct_prerequisites, status: lesson_status });
                         self.state = AppState::BrowsingLessons;
-                        self.update_cache(None);
                     }
                     StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
                     StudyEditorAction::Noop => (),
@@ -359,9 +313,48 @@ impl App {
         }
     }
 
-    pub fn handle_event(&mut self, event: &Event) {
-        if let Event::Key(key) = event {
-            self.handle_key(key);
+    fn handle_key_browsing(&mut self, key: &KeyEvent) {
+        match key.code {
+            KeyCode::Char('q') => self.state = AppState::Quitting,
+            KeyCode::Char('a') => {
+                self.state = AppState::AddingNewLesson(LessonEditForm::new(
+                    self.lessons.lessons().iter()
+                    .map(|(id,node)| (*id, node.lesson.to_lesson_info())).
+                    collect(),
+                    LessonInfo::default(),
+                ))
+            }
+            KeyCode::Char('s') => {
+                self.state = AppState::Searching(FuzzyFinder::new(
+                    self.lessons.lessons().iter().map(|(id, node)| (*id, node.lesson.to_lesson_info())).collect(),
+                ))
+            }
+            KeyCode::Char('e') => {
+                if let Some(currently_selected) = self.main_list.currently_selected_id() {
+                    let form = LessonEditForm::new(
+                        self.lessons.lessons().iter()
+                        .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected))
+                        .map(|(id, node)| (*id, node.lesson.to_lesson_info()))
+                        .collect(),
+                        self.lessons.get(currently_selected).lesson.to_lesson_info(),
+                    );
+                    self.state =
+                        AppState::EditingLesson(currently_selected, form);
+                }
+            }
+            KeyCode::Char('l') => {
+                if let Some(currently_selected_id) = self.main_list.currently_selected_id() {
+                    let status = self.lessons.lessons().get(&currently_selected_id).unwrap().lesson.status;
+
+                    self.state = AppState::Studying(currently_selected_id, StudyEditor::new(status));
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(node) = self.lessons.random_pending(&mut self.rng) {
+                    self.main_list.select(node.lesson.get_id());
+                }
+            }
+            _ => self.main_list.handle_key(key),
         }
     }
 }

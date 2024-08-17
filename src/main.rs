@@ -7,8 +7,10 @@ use crossterm::{
 use buisson::app::{App, AppError};
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use std::io::stdout;
+use cli_log::*;
 
 fn main() -> Result<(), AppError> {
+    init_cli_log!();
     stdout()
         .execute(EnterAlternateScreen)
         .map_err(AppError::IOError)?;

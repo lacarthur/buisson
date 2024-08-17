@@ -35,6 +35,10 @@ pub struct TextInput {
 }
 
 impl TextInput {
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
     pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
         self.render_with_style(area, frame, TextInputStyle::default());
     }
@@ -79,12 +83,8 @@ impl TextInput {
         }
     }
 
-    pub fn to_str(&self) -> &str {
-        &self.text
-    }
-
     /// the length of the displayed text, in actual characters instead of bytes
-    fn text_len(&self) -> u16 {
+    pub fn text_len(&self) -> u16 {
         self.text.chars().count() as u16
     }
 }

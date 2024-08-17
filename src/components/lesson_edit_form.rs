@@ -1,60 +1,40 @@
+use std::collections::HashMap;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Style, Stylize},
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph},
+    text::{Line, Text},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 
 use crate::{
-    components::textinput::TextInput,
-    lessons::{GraphNode, Id, LessonInfo, LessonStatus},
+    app::Context, components::textinput::TextInput, lessons::{Id, LessonInfo, LessonStatus}, style_from_status
 };
 
 use super::{
-    fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
-    node_list::{BasicNodeDisplayer, NodeListDisplay, NodeListStyle},
-    textinput::TextInputStyle,
+    fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, node_list::NodeList
 };
 
 #[derive(Debug)]
-enum LessonEditFormState {
+pub enum LessonEditFormState {
     EditingName,
     NavigatingPrereqs,
     AddingPrereq(FuzzyFinder),
     Validating,
 }
 
-pub enum FormType {
-    NewLesson,
-    EditLesson(Id),
-}
-
 pub struct LessonEditForm {
-    form_type: FormType,
+    /// represents the lessons that can be added as prerequisite. It is initialized as all the
+    /// existing lessons for new lessons, and all the lessons that don't depend on the edited
+    /// lesson for existing lessons
+    potential_prerequisites: HashMap<Id, (LessonInfo, bool)>,
     name_input: TextInput,
-    prerequisites: NodeListDisplay<BasicNodeDisplayer>,
-    /// does the form actually need to own this? I don't know, something to investigate. It certainly
-    /// doesn't modify it.
-    all_current_lessons: Vec<GraphNode>,
+    prerequisites: NodeList,
     state: LessonEditFormState,
+    // why do we (only) need this?
     lesson_status: LessonStatus,
-}
-
-/// return true if id1 has id2 as a prereq somewhere.
-fn depends_on(id1: Id, id2: Id, all_lessons: &[GraphNode]) -> bool {
-    if id1 == id2 {
-        return true;
-    }
-
-    for &prereq_id in &all_lessons[id1 as usize].lesson.depends_on {
-        if depends_on(prereq_id, id2, all_lessons) {
-            return true;
-        }
-    }
-
-    false
 }
 
 pub enum LessonEditFormAction {
@@ -64,26 +44,31 @@ pub enum LessonEditFormAction {
 
 impl LessonEditForm {
     pub fn new(
-        form_type: FormType,
+        potential_prerequisites: HashMap<Id, LessonInfo>,
         lesson: LessonInfo,
-        all_current_lessons: Vec<GraphNode>,
     ) -> Self {
+        let potential_prerequisites = potential_prerequisites.into_iter()
+            .map(|(id, info)| (id, (info, false)))
+            .collect();
         Self {
-            form_type,
+            potential_prerequisites,
             name_input: TextInput::new(lesson.name),
-            prerequisites: NodeListDisplay::new(
-                lesson
-                    .depends_on
-                    .into_iter()
-                    .map(|id| all_current_lessons[id as usize].clone())
-                    .collect(),
-            ),
-            all_current_lessons,
+            prerequisites: NodeList::new(lesson.direct_prerequisites.clone()),
             state: LessonEditFormState::EditingName,
             lesson_status: lesson.status,
         }
     }
 
+    pub fn to_lesson_info(&self) -> LessonInfo {
+        LessonInfo {
+            name: self.name_input.text().into(),
+            direct_prerequisites: self.prerequisites.ids().into(),
+            status: self.lesson_status,
+        }
+    }
+}
+
+impl LessonEditForm {
     pub fn handle_key(&mut self, key: &KeyEvent) -> LessonEditFormAction {
         match &mut self.state {
             LessonEditFormState::EditingName => match key.code {
@@ -98,24 +83,10 @@ impl LessonEditForm {
             },
             LessonEditFormState::NavigatingPrereqs => match key.code {
                 KeyCode::Char('a') => {
-                    let current_prereq_ids = self.prerequisites.get_all_ids();
                     self.state = LessonEditFormState::AddingPrereq(FuzzyFinder::new(
-                        self.all_current_lessons
-                            .iter()
-                            .filter(|node| {
-                                if let FormType::EditLesson(id) = self.form_type {
-                                    if depends_on(
-                                        node.lesson.get_id(),
-                                        id,
-                                        &self.all_current_lessons,
-                                    ) {
-                                        return false;
-                                    }
-                                }
-                                !current_prereq_ids.contains(&node.lesson.get_id())
-                            })
-                            .cloned()
-                            .collect(),
+                            self.potential_prerequisites.clone().into_iter()
+                            .filter(|(_, (_, already_prereq))| !already_prereq)
+                            .map(|(id, (info, _))| (id, info)).collect()
                     ));
                 }
                 KeyCode::Esc => return LessonEditFormAction::Terminate(None),
@@ -128,16 +99,19 @@ impl LessonEditForm {
                     self.state = LessonEditFormState::EditingName
                 }
                 KeyCode::Char('d') => {
-                    if let Some(id) = self.prerequisites.selected_id() {
-                        self.prerequisites.remove_node_by_id(id);
+                    if let Some(id) = self.prerequisites.currently_selected_id() {
+                        self.potential_prerequisites.entry(id)
+                            .and_modify(|(_, already_prereq)| *already_prereq = false);
+                        self.prerequisites.remove_node(id);
                     }
                 }
                 _ => self.prerequisites.handle_key(key),
             },
             LessonEditFormState::AddingPrereq(finder) => match finder.handle_key(key) {
                 FuzzyFinderAction::Terminate(Some(id)) => {
-                    self.prerequisites
-                        .add_new_node(self.all_current_lessons[id as usize].clone());
+                    self.prerequisites.push(id);
+                    self.potential_prerequisites.entry(id)
+                        .and_modify(|(_, already_prereq)| *already_prereq = true);
                     self.state = LessonEditFormState::NavigatingPrereqs;
                 }
                 FuzzyFinderAction::Terminate(None) => {
@@ -159,17 +133,12 @@ impl LessonEditForm {
         }
         LessonEditFormAction::Noop
     }
+}
 
-    fn block_name(&self) -> &str {
-        match self.form_type {
-            FormType::NewLesson => "Add New Lesson",
-            FormType::EditLesson(_) => "Edit Lesson",
-        }
-    }
-
-    pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
+impl LessonEditForm {
+    pub fn render(&self, context: Context, area: Rect, frame: &mut Frame<'_>) {
         let main_block = Block::new()
-            .title(self.block_name())
+            .title("Lesson Editor")
             .title_alignment(Alignment::Center)
             .borders(Borders::ALL)
             .border_style(Style::new().bold());
@@ -190,7 +159,7 @@ impl LessonEditForm {
 
         self.render_name_input(name_input_area, frame);
 
-        self.render_prereq_list(prereqs_area, frame);
+        self.render_prereq_list(context.clone(), prereqs_area, frame);
 
         self.render_button(validating_button_area, frame);
 
@@ -209,7 +178,7 @@ impl LessonEditForm {
             .split(layout[1]);
 
             frame.render_widget(Clear, layout[1]);
-            finder.render(layout[1], frame);
+            finder.render(context, layout[1], frame);
         }
     }
 
@@ -222,46 +191,16 @@ impl LessonEditForm {
             block
         };
 
-        let textinput_style = if let LessonEditFormState::EditingName = self.state {
-            TextInputStyle::default()
-                .block(name_input_block)
-                .display_cursor()
-        } else {
-            TextInputStyle::default().block(name_input_block)
-        };
+        let text_widget = Paragraph::new(self.name_input.text()).block(name_input_block);
 
-        self.name_input
-            .render_with_style(area, frame, textinput_style);
+        frame.render_widget(text_widget, area);
+        if matches!(self.state, LessonEditFormState::EditingName) {
+            frame.set_cursor(area.x + 1 + self.name_input.text_len(), area.y + 1);
+        }
     }
 
-    fn render_button(&self, area: Rect, frame: &mut Frame<'_>) {
-        let layout = Layout::horizontal([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-        ])
-        .split(area);
-        let layout = Layout::vertical([Constraint::Min(1), Constraint::Min(3), Constraint::Min(1)])
-            .split(layout[1]);
-
-        let style = if let LessonEditFormState::Validating = self.state {
-            Style::default().reversed()
-        } else {
-            Style::default()
-        };
-
-        let button_area = layout[1];
-
-        let button_widget = Paragraph::new("OK")
-            .alignment(Alignment::Center)
-            .block(Block::new().borders(Borders::all()))
-            .style(style);
-
-        frame.render_widget(button_widget, button_area);
-    }
-
-    fn render_prereq_list(&self, area: Rect, frame: &mut Frame<'_>) {
-        let title_style = match &self.state {
+    fn render_prereq_list(&self, context: Context, area: Rect, frame: &mut Frame<'_>) {
+        let title_style = match self.state {
             LessonEditFormState::EditingName | LessonEditFormState::Validating => Style::default(),
             LessonEditFormState::NavigatingPrereqs | LessonEditFormState::AddingPrereq(_) => {
                 Style::default().bold()
@@ -279,25 +218,51 @@ impl LessonEditForm {
 
         frame.render_widget(prereq, layout[0]);
 
-        let node_list_style = if let LessonEditFormState::NavigatingPrereqs = self.state {
-            NodeListStyle::default()
+        let items = self.prerequisites
+            .ids()
+            .iter()
+            .map(|id| {
+                let node = context.lessons.get(id).unwrap();
+                let text = Text::from(node.lesson.name.as_str()).style(style_from_status(&node.status));
+                ListItem::from(text)
+            });
+
+        let list_widget = List::new(items).highlight_style(Style::default().reversed());
+
+        if matches!(self.state, LessonEditFormState::NavigatingPrereqs) {
+            frame.render_stateful_widget(list_widget, area, &mut self.prerequisites.list_state_refcell().borrow_mut());
         } else {
-            NodeListStyle::default().dont_display_selected()
-        };
+            frame.render_widget(list_widget, area);
+        }
 
-        self.prerequisites
-            .render_with_style(layout[1], frame, node_list_style);
-
-        if let LessonEditFormState::NavigatingPrereqs = self.state {
+        if matches!(self.state, LessonEditFormState::NavigatingPrereqs) {
             frame.render_widget(help, layout[2]);
         }
     }
 
-    pub fn to_lesson_info(&self) -> LessonInfo {
-        LessonInfo {
-            name: self.name_input.to_str().into(),
-            depends_on: self.prerequisites.get_all_ids(),
-            status: self.lesson_status.clone(),
-        }
+    fn render_button(&self, area: Rect, frame: &mut Frame<'_>) {
+        let layout = Layout::horizontal([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+        let layout = Layout::vertical([Constraint::Min(1), Constraint::Min(3), Constraint::Min(1)])
+            .split(layout[1]);
+
+        let style = if matches!(self.state, LessonEditFormState::Validating) {
+            Style::default().reversed()
+        } else {
+            Style::default()
+        };
+
+        let button_area = layout[1];
+
+        let button_widget = Paragraph::new("OK")
+            .alignment(Alignment::Center)
+            .block(Block::new().borders(Borders::all()))
+            .style(style);
+
+        frame.render_widget(button_widget, button_area);
     }
 }
