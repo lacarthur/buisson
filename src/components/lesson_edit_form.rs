@@ -230,9 +230,9 @@ impl LessonEditForm {
         let list_widget = List::new(items).highlight_style(Style::default().reversed());
 
         if matches!(self.state, LessonEditFormState::NavigatingPrereqs) {
-            frame.render_stateful_widget(list_widget, area, &mut self.prerequisites.list_state_refcell().borrow_mut());
+            frame.render_stateful_widget(list_widget, layout[1], &mut self.prerequisites.list_state_refcell().borrow_mut());
         } else {
-            frame.render_widget(list_widget, area);
+            frame.render_widget(list_widget, layout[1]);
         }
 
         if matches!(self.state, LessonEditFormState::NavigatingPrereqs) {
