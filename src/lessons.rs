@@ -415,7 +415,7 @@ struct GraphBuilder<Backend: IOBackend> {
 
 impl<Backend: IOBackend> GraphBuilder<Backend> {
     fn into_graph(mut self) -> Graph<Backend> {
-        let mut max_id = 0;
+        let mut max_id = None;
         self.resolve();
         let mut children = HashMap::new();
         // we do this so that lessons that don't have any children still have an empty vec instead
@@ -424,7 +424,10 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             children.insert(id, vec![]);
         }
         for (id, (lesson, _)) in &self.lessons {
-            max_id = std::cmp::max(max_id, *id);
+            max_id = match max_id {
+                None => Some(*id),
+                Some(current_max) => Some(std::cmp::max(current_max, *id))
+            };
             for &parent in &lesson.direct_prerequisites {
                 // technically we dont need the or_insert, but ill keep it out of laziness.
                 children.entry(parent).and_modify(|list: &mut Vec<Id>| list.push(lesson.id)).or_insert(vec![lesson.id]);
@@ -432,7 +435,10 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
         }
         
         Graph {
-            next_id: max_id + 1,
+            next_id: match max_id {
+                None => 0,
+                Some(max_id) => max_id + 1,
+            },
             nodes: self
                 .lessons
                 .into_iter()
@@ -459,6 +465,8 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
     /// this function is to be called recursivley, changing the stored status of the nodes as it
     /// computes it.
     fn get_status(&mut self, id: Id) -> NodeStatus {
+        debug!("Calling `get_status` for lesson with id {}", id);
+        debug!("lessons = {:?}", &self.lessons);
         if let Some(status) = &self.lessons.get(&id).unwrap().1 {
             return status.clone();
         }
