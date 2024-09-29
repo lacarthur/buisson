@@ -35,7 +35,6 @@ pub enum AppError {
     XDGError(xdg::BaseDirectoriesError),
 }
 
-
 pub struct App {
     lessons: Graph<SQLiteBackend>,
     main_list: NodeList,
@@ -324,7 +323,7 @@ impl App {
                     LessonInfo::default(),
                 ))
             }
-            KeyCode::Char('s') => {
+            KeyCode::Char('/') => {
                 self.state = AppState::Searching(FuzzyFinder::new(
                     self.lessons.lessons().iter().map(|(id, node)| (*id, node.lesson.to_lesson_info())).collect(),
                 ))
