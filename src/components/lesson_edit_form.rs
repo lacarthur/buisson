@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Position, Rect},
     style::{Style, Stylize},
     text::{Line, Text},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
@@ -195,7 +195,7 @@ impl LessonEditForm {
 
         frame.render_widget(text_widget, area);
         if matches!(self.state, LessonEditFormState::EditingName) {
-            frame.set_cursor(area.x + 1 + self.name_input.text_len(), area.y + 1);
+            frame.set_cursor_position(Position { x: area.x + 1 + self.name_input.text_len(), y: area.y + 1 });
         }
     }
 

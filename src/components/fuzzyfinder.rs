@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{layout::{Alignment, Constraint, Layout, Rect}, style::{Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, Paragraph}, Frame};
+use ratatui::{layout::{Alignment, Constraint, Layout, Position, Rect}, style::{Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, Paragraph}, Frame};
 
 use crate::{
     app::Context, components::textinput::TextInput, lessons::{Id, LessonInfo}, style_from_status
@@ -171,7 +171,7 @@ impl FuzzyFinder {
         frame.render_widget(text_widget, area);
 
         if matches!(self.state, FuzzyFinderState::TypingSearch) {
-            frame.set_cursor(area.x + 1 + self.search_bar.text_len(), area.y + 1);
+            frame.set_cursor_position(Position { x: area.x + 1 + self.search_bar.text_len(), y: area.y + 1 });
         }
     }
 }

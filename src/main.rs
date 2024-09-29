@@ -23,7 +23,7 @@ fn main() -> Result<(), AppError> {
     while !app.is_quitting() {
         terminal
             .draw(|frame| {
-                app.render(frame.size(), frame);
+                app.render(frame.area(), frame);
             })
             .map_err(AppError::IOError)?;
 
