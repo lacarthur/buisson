@@ -328,6 +328,12 @@ impl App {
                     self.lessons.lessons().iter().map(|(id, node)| (*id, node.lesson.to_lesson_info())).collect(),
                 ))
             }
+            KeyCode::Char('d') => {
+                if let Some(id) = self.main_list.currently_selected_id() {
+                    self.main_list.remove_node(id);
+                    self.lessons.delete_node(id);
+                }
+            }
             KeyCode::Char('e') => {
                 if let Some(currently_selected) = self.main_list.currently_selected_id() {
                     let form = LessonEditForm::new(

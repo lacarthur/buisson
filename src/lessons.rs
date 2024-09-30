@@ -26,6 +26,8 @@ pub trait IOBackend {
     fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
 
     fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
+
+    fn remove_lesson(&self, id: Id) -> Result<(), Self::Error>;
 }
 
 pub struct SQLiteBackend {
@@ -104,6 +106,16 @@ impl IOBackend for SQLiteBackend {
                 &lesson.name,
                 &ids_to_bytes(&lesson.direct_prerequisites),
                 ron::to_string(&lesson.status).unwrap(),
+            ),
+        )?;
+        Ok(())
+    }
+
+    fn remove_lesson(&self, id: Id) -> Result<(), Self::Error> {
+        self.connection.execute(
+            "DELETE FROM lesson WHERE id = ?1",
+            (
+                &id,
             ),
         )?;
         Ok(())
@@ -235,7 +247,7 @@ pub struct Graph<T: IOBackend> {
     nodes: HashMap<Id, GraphNode>,
     /// `children[id]` is the list of lessons that have lesson `id` as a prerequisite. This is kept
     /// in memory to help with updating the nodes at runtime. It is not stored to the disk and is
-    /// instead computed at the start of the program
+    /// instead computed at the start of the program and updated throughout
     children: HashMap<Id, Vec<Id>>,
     next_id: Id,
 
@@ -272,6 +284,36 @@ impl<T: IOBackend> Graph<T> {
 
         debug!("End node creation, with Id {}", id);
         id
+    }
+
+    /// Delete node with id `id`. Keeps the internal state consistent, removes the `id` from
+    /// prerequisite lists of other nodes.
+    pub fn delete_node(&mut self, id: Id) {
+        let node = self.nodes.remove(&id).unwrap();
+
+        // we remove the id from the list of children of its prerequisites
+        for prereq in node.lesson.direct_prerequisites {
+            self.children.get_mut(&prereq).unwrap().retain(|&child| child != id);
+        }
+
+        // we remove the id from the direct prerequisites list of its children, and also do it in
+        // the database
+        let children = self.children.remove(&id).unwrap();
+        for &child_id in &children {
+            let child = self.nodes.get_mut(&child_id).unwrap();
+            child.lesson.direct_prerequisites.retain(|&parent| parent != id);
+            self.io_backend.update_existing_lesson(&Lesson {
+                id: child_id,
+                name: child.lesson.name.clone(),
+                direct_prerequisites: child.lesson.direct_prerequisites.clone(),
+                status: child.lesson.status,
+            }).expect("the database child update to work");
+        }
+
+        for &child_id in &children {
+            self.update_lesson_status(child_id);
+        }
+        self.io_backend.remove_lesson(id).expect("the database delete to work");
     }
 
     /// this function is called when a node is edited. It is useful if a lesson has a new
@@ -500,8 +542,9 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
 
     /// ensures every status is being computed
     fn resolve(&mut self) {
-        for i in 0..self.lessons.len() {
-            self.get_status(i as u64);
+        let keys = self.lessons.keys().cloned().collect::<Vec<_>>();
+        for i in keys {
+            self.get_status(i);
         }
     }
 }
@@ -526,6 +569,10 @@ mod tests {
         }
 
         fn update_existing_lesson(&self, _lesson: &Lesson) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn remove_lesson(&self, _id: Id) -> Result<(), Self::Error> {
             Ok(())
         }
     }
