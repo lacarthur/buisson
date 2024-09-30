@@ -443,6 +443,10 @@ impl<T: IOBackend> Graph<T> {
 
         false
     }
+
+    pub fn get_children(&self, id: &Id) -> &[Id] {
+        self.children.get(&id).unwrap()
+    }
 }
 
 /// A struct used to construct `Graph`s. they are initialized by loading the lessons from the

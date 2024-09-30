@@ -23,6 +23,7 @@ enum AppState {
     BrowsingLessons,
     AddingNewLesson(LessonEditForm),
     EditingLesson(Id, LessonEditForm),
+    ConfirmingDeletion(Id),
     Studying(Id, StudyEditor),
     Searching(FuzzyFinder),
     Quitting,
@@ -143,7 +144,151 @@ impl App {
                 frame.render_widget(block, vertical_area);
                 study_editor.render(study_editor_area, frame);
             }
+            AppState::ConfirmingDeletion(id_to_delete) => {
+                self.render_side_panel(right_panel_minus_bar, frame);
+                if !self.render_deletion_confirmation_popup(id_to_delete, area, frame) {
+                    self.render_status_line_deletion_confirmation(id_to_delete, bottom_bar, frame);
+                }
+            }
         }
+    }
+
+    fn render_deletion_confirmation_popup(&self, id_to_delete: &Id, area: Rect, frame: &mut Frame<'_>) -> bool {
+        let children_id = self.lessons.get_children(id_to_delete);
+        
+        let confirmation_message = format!("Confirm deletion : {}", self.lessons.get(*id_to_delete).lesson.name);
+
+        let num_cols_needed: u16 = 2 // block border
+                                 + 2 // some padding
+                                 + unicode_width::UnicodeWidthStr::width(confirmation_message.as_str()) as u16;
+        
+        let actual_width = area.width - 4;
+        let popup_width = std::cmp::min(actual_width, num_cols_needed);
+        let padding_left = (area.width - popup_width) / 2;
+        let padding_right = area.width - padding_left - popup_width;
+
+        let vertical_area = Layout::horizontal([
+            Constraint::Length(padding_left),
+            Constraint::Length(popup_width),
+            Constraint::Length(padding_right),
+        ]).split(area)[1];
+
+        if area.height < 4 {
+            return false;
+        }
+
+        let actual_height = area.height - 4;
+
+        if actual_height <= 3 {
+            return false;
+        } else if actual_height == 4 {
+            let popup_area = Layout::vertical([
+                Constraint::Length(2),
+                Constraint::Length(4),
+                Constraint::Length(2),
+            ]).split(vertical_area)[1];
+
+            let lines = vec![
+                Line::from(vec![Span::raw(confirmation_message)]),
+                Line::from(vec![Span::raw("Y/n")]),
+            ];
+            frame.render_widget(Clear, popup_area);
+            let widget = Paragraph::new(lines).block(Block::new().borders(Borders::ALL));
+            frame.render_widget(widget, popup_area);
+        } else if children_id.is_empty() {
+            let padding_top = (area.height - 5) / 2;
+            let padding_bottom = area.height - 5 - padding_top;
+
+            let popup_area = Layout::vertical([
+                Constraint::Length(padding_top),
+                Constraint::Length(5),
+                Constraint::Length(padding_bottom),
+            ]).split(vertical_area)[1];
+
+            let lines = vec![
+                Line::from(vec![Span::raw(confirmation_message)]),
+                Line::default(),
+                Line::from(vec![Span::raw("Y/n")]),
+            ];
+            frame.render_widget(Clear, popup_area);
+            let widget = Paragraph::new(lines).block(Block::new().borders(Borders::ALL));
+            frame.render_widget(widget, popup_area);
+        } else if actual_height == 5 {
+            let padding_top = (area.height - 5) / 2;
+            let padding_bottom = area.height - 5 - padding_top;
+
+            let popup_area = Layout::vertical([
+                Constraint::Length(padding_top),
+                Constraint::Length(5),
+                Constraint::Length(padding_bottom),
+            ]).split(vertical_area)[1];
+
+            let lines = vec![
+                Line::from(vec![Span::raw(confirmation_message)]),
+                Line::from(vec![Span::raw(format!("There are {} lessons depending on it", children_id.len()))]),
+                Line::from(vec![Span::raw("Y/n")]),
+            ];
+            frame.render_widget(Clear, popup_area);
+            let widget = Paragraph::new(lines).block(Block::new().borders(Borders::ALL));
+            frame.render_widget(widget, popup_area);
+        } else if actual_height < 6 + children_id.len() as u16 {
+            let padding_top = (area.height - 5) / 2;
+            let padding_bottom = area.height - 5 - padding_top;
+
+            let popup_area = Layout::vertical([
+                Constraint::Length(padding_top),
+                Constraint::Length(6),
+                Constraint::Length(padding_bottom),
+            ]).split(vertical_area)[1];
+
+            let lines = vec![
+                Line::from(vec![Span::raw(confirmation_message)]),
+                Line::from(vec![Span::raw(format!("There are {} lessons depending on it", children_id.len()))]),
+                Line::default(),
+                Line::from(vec![Span::raw("Y/n")]),
+            ];
+            let widget = Paragraph::new(lines).block(Block::new().borders(Borders::ALL));
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(widget, popup_area);
+        } else {
+            let height_needed = 6 + children_id.len() as u16;
+
+            let padding_top = (area.height - height_needed) / 2;
+            let padding_bottom = area.height - padding_top - height_needed;
+
+            let popup_area = Layout::vertical([
+                Constraint::Length(padding_top),
+                Constraint::Length(height_needed),
+                Constraint::Length(padding_bottom),
+            ]).split(vertical_area)[1];
+
+            let mut lines = vec![
+                Line::from(vec![Span::raw(confirmation_message)]),
+                Line::from(vec![Span::raw("The following lessons depend on it:")]),
+                Line::default(),
+            ];
+
+            lines.extend(children_id.iter().map(|id| {
+                let child_node = self.lessons.get(*id);
+                Line::from(vec![Span::styled(
+                    &child_node.lesson.name,
+                    style_from_status(&child_node.status),
+                )])
+            }));
+            lines.push(Line::from(vec![Span::raw("Y/n")]));
+            let widget = Paragraph::new(lines).block(Block::new().borders(Borders::ALL));
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(widget, popup_area);
+        }
+
+        true
+    }
+
+    fn render_status_line_deletion_confirmation(&self, id_to_delete: &Id, area: Rect, frame: &mut Frame<'_>) {
+        frame.render_widget(
+            Text::from(format!("Confirm deletion of lesson \"{}\"? Y/n", self.lessons.get(*id_to_delete).lesson.name)), 
+            area
+        )
     }
 
     /// Renders information about `node`.
@@ -308,6 +453,19 @@ impl App {
                     StudyEditorAction::Noop => (),
                 }
             }
+            AppState::ConfirmingDeletion(id) => {
+                match key.code {
+                    KeyCode::Char('Y') => {
+                        self.main_list.remove_node(*id);
+                        self.lessons.delete_node(*id);
+                        self.state = AppState::BrowsingLessons;
+                    }
+                    KeyCode::Char('n') | KeyCode::Esc => {
+                        self.state = AppState::BrowsingLessons;
+                    }
+                    _ => (),
+                }
+            }
             AppState::Quitting => (),
         }
     }
@@ -330,8 +488,7 @@ impl App {
             }
             KeyCode::Char('d') => {
                 if let Some(id) = self.main_list.currently_selected_id() {
-                    self.main_list.remove_node(id);
-                    self.lessons.delete_node(id);
+                    self.state = AppState::ConfirmingDeletion(id);
                 }
             }
             KeyCode::Char('e') => {
