@@ -8,7 +8,7 @@ use crate::lessons::Id;
 #[derive(Debug)]
 pub struct NodeList {
     ids: Vec<Id>,
-    list_state: RefCell<ListState>
+    list_state: RefCell<ListState>,
 }
 
 impl NodeList {
@@ -22,7 +22,10 @@ impl NodeList {
     }
 
     pub fn currently_selected_id(&self) -> Option<Id> {
-        self.list_state.borrow().selected().map(|list_index| self.ids[list_index])
+        self.list_state
+            .borrow()
+            .selected()
+            .map(|list_index| self.ids[list_index])
     }
 
     pub fn ids(&self) -> &[Id] {

@@ -47,7 +47,10 @@ impl TextInput {
         let text_widget = Paragraph::new(self.text.as_str());
 
         if display_cursor {
-            frame.set_cursor_position(Position { x: area.x + self.text_len(), y: area.y });
+            frame.set_cursor_position(Position {
+                x: area.x + self.text_len(),
+                y: area.y,
+            });
         }
 
         frame.render_widget(text_widget, area);

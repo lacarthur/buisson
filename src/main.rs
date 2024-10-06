@@ -5,9 +5,9 @@ use crossterm::{
 };
 
 use buisson::app::{App, AppError};
+use cli_log::*;
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use std::io::stdout;
-use cli_log::*;
 
 fn main() -> Result<(), AppError> {
     init_cli_log!();

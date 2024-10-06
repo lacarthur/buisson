@@ -10,11 +10,15 @@ use ratatui::{
 };
 
 use crate::{
-    app::Context, components::textinput::TextInput, lessons::{Id, LessonInfo, LessonStatus}, style_from_status
+    app::Context,
+    components::textinput::TextInput,
+    lessons::{Id, LessonInfo, LessonStatus},
+    style_from_status,
 };
 
 use super::{
-    fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, node_list::NodeList
+    fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
+    node_list::NodeList,
 };
 
 #[derive(Debug)]
@@ -43,11 +47,9 @@ pub enum LessonEditFormAction {
 }
 
 impl LessonEditForm {
-    pub fn new(
-        potential_prerequisites: HashMap<Id, LessonInfo>,
-        lesson: LessonInfo,
-    ) -> Self {
-        let potential_prerequisites = potential_prerequisites.into_iter()
+    pub fn new(potential_prerequisites: HashMap<Id, LessonInfo>, lesson: LessonInfo) -> Self {
+        let potential_prerequisites = potential_prerequisites
+            .into_iter()
             .map(|(id, info)| (id, (info, false)))
             .collect();
         Self {
@@ -84,9 +86,12 @@ impl LessonEditForm {
             LessonEditFormState::NavigatingPrereqs => match key.code {
                 KeyCode::Char('a') => {
                     self.state = LessonEditFormState::AddingPrereq(FuzzyFinder::new(
-                            self.potential_prerequisites.clone().into_iter()
+                        self.potential_prerequisites
+                            .clone()
+                            .into_iter()
                             .filter(|(_, (_, already_prereq))| !already_prereq)
-                            .map(|(id, (info, _))| (id, info)).collect()
+                            .map(|(id, (info, _))| (id, info))
+                            .collect(),
                     ));
                 }
                 KeyCode::Esc => return LessonEditFormAction::Terminate(None),
@@ -100,7 +105,8 @@ impl LessonEditForm {
                 }
                 KeyCode::Char('d') => {
                     if let Some(id) = self.prerequisites.currently_selected_id() {
-                        self.potential_prerequisites.entry(id)
+                        self.potential_prerequisites
+                            .entry(id)
                             .and_modify(|(_, already_prereq)| *already_prereq = false);
                         self.prerequisites.remove_node(id);
                     }
@@ -110,7 +116,8 @@ impl LessonEditForm {
             LessonEditFormState::AddingPrereq(finder) => match finder.handle_key(key) {
                 FuzzyFinderAction::Terminate(Some(id)) => {
                     self.prerequisites.push(id);
-                    self.potential_prerequisites.entry(id)
+                    self.potential_prerequisites
+                        .entry(id)
                         .and_modify(|(_, already_prereq)| *already_prereq = true);
                     self.state = LessonEditFormState::NavigatingPrereqs;
                 }
@@ -195,7 +202,10 @@ impl LessonEditForm {
 
         frame.render_widget(text_widget, area);
         if matches!(self.state, LessonEditFormState::EditingName) {
-            frame.set_cursor_position(Position { x: area.x + 1 + self.name_input.text_len(), y: area.y + 1 });
+            frame.set_cursor_position(Position {
+                x: area.x + 1 + self.name_input.text_len(),
+                y: area.y + 1,
+            });
         }
     }
 
@@ -218,19 +228,20 @@ impl LessonEditForm {
 
         frame.render_widget(prereq, layout[0]);
 
-        let items = self.prerequisites
-            .ids()
-            .iter()
-            .map(|id| {
-                let node = context.lessons.get(id).unwrap();
-                let text = Text::from(node.lesson.name.as_str()).style(style_from_status(&node.status));
-                ListItem::from(text)
-            });
+        let items = self.prerequisites.ids().iter().map(|id| {
+            let node = context.lessons.get(id).unwrap();
+            let text = Text::from(node.lesson.name.as_str()).style(style_from_status(&node.status));
+            ListItem::from(text)
+        });
 
         let list_widget = List::new(items).highlight_style(Style::default().reversed());
 
         if matches!(self.state, LessonEditFormState::NavigatingPrereqs) {
-            frame.render_stateful_widget(list_widget, layout[1], &mut self.prerequisites.list_state_refcell().borrow_mut());
+            frame.render_stateful_widget(
+                list_widget,
+                layout[1],
+                &mut self.prerequisites.list_state_refcell().borrow_mut(),
+            );
         } else {
             frame.render_widget(list_widget, layout[1]);
         }

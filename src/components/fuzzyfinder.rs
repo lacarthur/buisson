@@ -1,8 +1,17 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{layout::{Alignment, Constraint, Layout, Position, Rect}, style::{Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, List, ListItem, Paragraph}, Frame};
+use ratatui::{
+    layout::{Alignment, Constraint, Layout, Position, Rect},
+    style::{Style, Stylize},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame,
+};
 
 use crate::{
-    app::Context, components::textinput::TextInput, lessons::{Id, LessonInfo}, style_from_status
+    app::Context,
+    components::textinput::TextInput,
+    lessons::{Id, LessonInfo},
+    style_from_status,
 };
 
 use super::node_list::NodeList;
@@ -35,9 +44,7 @@ pub enum FuzzyFinderAction {
 
 impl FuzzyFinder {
     pub fn new(original_list: Vec<(Id, LessonInfo)>) -> Self {
-        let id_list = original_list.iter()
-            .map(|&(id, _)| id)
-            .collect();
+        let id_list = original_list.iter().map(|&(id, _)| id).collect();
 
         let match_list = NodeList::new(id_list);
         Self {
@@ -50,12 +57,12 @@ impl FuzzyFinder {
 
     fn perform_search(&self) -> Vec<Id> {
         let searched_string = self.search_bar.text();
-        self.original_list.iter()
+        self.original_list
+            .iter()
             .filter(|(_, info)| info.name.contains(searched_string))
             .map(|&(id, _)| id)
             .collect()
     }
-
 }
 
 impl FuzzyFinder {
@@ -100,7 +107,8 @@ impl FuzzyFinder {
 
 impl FuzzyFinder {
     pub fn render(&self, context: Context<'_>, area: Rect, frame: &mut Frame<'_>) {
-        let main_layout = Layout::vertical([Constraint::Percentage(100), Constraint::Min(3)]).split(area);
+        let main_layout =
+            Layout::vertical([Constraint::Percentage(100), Constraint::Min(3)]).split(area);
 
         let list_area = main_layout[0];
         let searchbar_area = main_layout[1];
@@ -118,36 +126,35 @@ impl FuzzyFinder {
             } else {
                 Style::default()
             });
-        let list_items = self.match_list.ids().iter()
-            .map(|id| {
-                let node = context.lessons.get(id).unwrap();
-                let name = &node.lesson.name;
-                let occurences = name.match_indices(self.search_bar.text());
+        let list_items = self.match_list.ids().iter().map(|id| {
+            let node = context.lessons.get(id).unwrap();
+            let name = &node.lesson.name;
+            let occurences = name.match_indices(self.search_bar.text());
 
-                let mut spans = vec![];
-                let mut prev = 0;
+            let mut spans = vec![];
+            let mut prev = 0;
 
-                for (index, _) in occurences {
-                    let span_not_match = Span::styled(
-                        &name[prev..index],
-                        style_from_status(&node.status),
-                    );
-                    spans.push(span_not_match);
-                    let span_match = Span::styled(self.search_bar.text(), Style::default().blue());
-                    spans.push(span_match);
-                    prev = index + self.search_bar.text().len();
-                }
+            for (index, _) in occurences {
+                let span_not_match =
+                    Span::styled(&name[prev..index], style_from_status(&node.status));
+                spans.push(span_not_match);
+                let span_match = Span::styled(self.search_bar.text(), Style::default().blue());
+                spans.push(span_match);
+                prev = index + self.search_bar.text().len();
+            }
 
-                spans.push(Span::styled(&name[prev..], style_from_status(&node.status)));
-                let text = Line::from(spans);
-                ListItem::new(text)
-            });
-        let list = List::new(list_items).block(block).highlight_style(Style::default().reversed());
+            spans.push(Span::styled(&name[prev..], style_from_status(&node.status)));
+            let text = Line::from(spans);
+            ListItem::new(text)
+        });
+        let list = List::new(list_items)
+            .block(block)
+            .highlight_style(Style::default().reversed());
 
         match self.state {
             FuzzyFinderState::TypingSearch => {
                 frame.render_widget(list, area);
-            },
+            }
             FuzzyFinderState::NavigatingResults => {
                 let list_state = &mut *self.match_list.list_state_refcell().borrow_mut();
                 frame.render_stateful_widget(list, area, list_state)
@@ -165,13 +172,15 @@ impl FuzzyFinder {
                 Style::default()
             });
 
-        let text_widget = Paragraph::new(self.search_bar.text())
-            .block(block);
+        let text_widget = Paragraph::new(self.search_bar.text()).block(block);
 
         frame.render_widget(text_widget, area);
 
         if matches!(self.state, FuzzyFinderState::TypingSearch) {
-            frame.set_cursor_position(Position { x: area.x + 1 + self.search_bar.text_len(), y: area.y + 1 });
+            frame.set_cursor_position(Position {
+                x: area.x + 1 + self.search_bar.text_len(),
+                y: area.y + 1,
+            });
         }
     }
 }
