@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::widgets::ListState;
 
-use crate::lessons::Id;
+use buisson_common::Id;
 
 #[derive(Debug)]
 pub struct NodeList {

@@ -1,0 +1,11 @@
+[package]
+name = "buisson-common"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.38", features = ["serde"] }
+cli-log = "2.0.0"
+rand = "0.8.5"
+serde = { version = "1.0.210", features = ["derive"] }

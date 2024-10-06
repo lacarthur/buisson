@@ -9,12 +9,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    app::Context,
-    components::textinput::TextInput,
-    lessons::{Id, LessonInfo, LessonStatus},
-    style_from_status,
-};
+use crate::{app::Context, components::textinput::TextInput, style_from_status};
+
+use buisson_common::{Id, LessonInfo, LessonStatus};
 
 use super::{
     fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},

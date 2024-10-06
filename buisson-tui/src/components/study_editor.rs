@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::lessons::LessonStatus;
+use buisson_common::LessonStatus;
 
 fn today() -> NaiveDate {
     chrono::offset::Local::now().date_naive()

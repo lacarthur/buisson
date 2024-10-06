@@ -4,7 +4,7 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use buisson::app::{App, AppError};
+use buisson_tui::app::{App, AppError};
 use cli_log::*;
 use ratatui::prelude::{CrosstermBackend, Terminal};
 use std::io::stdout;

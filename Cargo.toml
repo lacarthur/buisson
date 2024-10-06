@@ -1,17 +1,12 @@
-[package]
-name = "buisson"
+[workspace]
+members = [
+    "buisson-common",
+    "buisson-tui",
+    "buisson-leptos",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-
-[dependencies]
-byteorder = "1.5.0"
-chrono = { version = "0.4.38", features = ["serde"] }
-cli-log = "2.0.0"
-crossterm = "0.27.0"
-rand = "0.8.5"
-ratatui = "0.28.*"
-ron = "0.8.1"
-rusqlite = "0.31.0"
-serde = { version = "1.0.202", features = ["derive"] }
-unicode-width = "0.2.0"
-xdg = "2.5.2"
+description = "Learn complex subjects with ease!"

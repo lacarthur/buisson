@@ -17,9 +17,11 @@ use crate::{
         node_list::NodeList,
         study_editor::{StudyEditor, StudyEditorAction},
     },
-    lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
     style_from_status,
 };
+
+use crate::SQLiteBackend;
+use buisson_common::{Graph, GraphNode, Id, LessonInfo, LessonStatus};
 
 /// The state of the main application
 enum AppState {

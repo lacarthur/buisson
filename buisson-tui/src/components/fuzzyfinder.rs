@@ -7,12 +7,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    app::Context,
-    components::textinput::TextInput,
-    lessons::{Id, LessonInfo},
-    style_from_status,
-};
+use crate::{app::Context, components::textinput::TextInput, style_from_status};
+
+use buisson_common::{Id, LessonInfo};
 
 use super::node_list::NodeList;
 
