@@ -21,11 +21,11 @@ fn days_from_level(level: u32) -> u64 {
 
 pub trait IOBackend {
     type Error: std::fmt::Debug;
-    fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error>;
+    fn query_lessons(&self) -> Result<HashMap<Id, LessonInfo>, Self::Error>;
 
-    fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
+    fn add_new_lesson(&self, id: Id, lesson: &LessonInfo) -> Result<(), Self::Error>;
 
-    fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error>;
+    fn update_existing_lesson(&self, id: Id, lesson: &LessonInfo) -> Result<(), Self::Error>;
 
     fn remove_lesson(&self, id: Id) -> Result<(), Self::Error>;
 }
@@ -65,7 +65,7 @@ impl SQLiteBackend {
 impl IOBackend for SQLiteBackend {
     type Error = rusqlite::Error;
 
-    fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error> {
+    fn query_lessons(&self) -> Result<HashMap<Id, LessonInfo>, Self::Error> {
         let mut stmt = self
             .connection
             .prepare("SELECT id, name, depends_on, status FROM lesson")?;
@@ -73,23 +73,25 @@ impl IOBackend for SQLiteBackend {
         let lessons = stmt
             .query_map([], |row| {
                 let status_ron: String = row.get(3)?;
-                Ok((row.get(0)?, Lesson {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    direct_prerequisites: ids_from_bytes(&row.get(2)?),
-                    status: ron::from_str(&status_ron).unwrap(),
-                }))
+                Ok((
+                    row.get(0)?,
+                    LessonInfo {
+                        name: row.get(1)?,
+                        direct_prerequisites: ids_from_bytes(&row.get(2)?),
+                        status: ron::from_str(&status_ron).unwrap(),
+                    },
+                ))
             })?
-            .collect::<Result<HashMap<Id, Lesson>, _>>()?;
+            .collect::<Result<HashMap<Id, LessonInfo>, _>>()?;
 
         Ok(lessons)
     }
 
-    fn add_new_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error> {
+    fn add_new_lesson(&self, id: Id, lesson: &LessonInfo) -> Result<(), Self::Error> {
         self.connection.execute(
             "INSERT INTO lesson VALUES (?1, ?2, ?3, ?4)",
             (
-                &lesson.id,
+                id,
                 &lesson.name,
                 &ids_to_bytes(&lesson.direct_prerequisites),
                 ron::to_string(&lesson.status).unwrap(),
@@ -98,11 +100,11 @@ impl IOBackend for SQLiteBackend {
         Ok(())
     }
 
-    fn update_existing_lesson(&self, lesson: &Lesson) -> Result<(), Self::Error> {
+    fn update_existing_lesson(&self, id: Id, lesson: &LessonInfo) -> Result<(), Self::Error> {
         self.connection.execute(
             "UPDATE lesson SET name = ?2, depends_on = ?3, status = ?4 WHERE id = ?1",
             (
-                &lesson.id,
+                id,
                 &lesson.name,
                 &ids_to_bytes(&lesson.direct_prerequisites),
                 ron::to_string(&lesson.status).unwrap(),
@@ -112,12 +114,8 @@ impl IOBackend for SQLiteBackend {
     }
 
     fn remove_lesson(&self, id: Id) -> Result<(), Self::Error> {
-        self.connection.execute(
-            "DELETE FROM lesson WHERE id = ?1",
-            (
-                &id,
-            ),
-        )?;
+        self.connection
+            .execute("DELETE FROM lesson WHERE id = ?1", (&id,))?;
         Ok(())
     }
 }
@@ -179,23 +177,6 @@ pub struct LessonInfo {
     pub status: LessonStatus,
 }
 
-/// A lesson, meant to be serialized/deserialized, and storing informations that are independant of
-/// runtime.
-/// TODO: do we actually need to make this public? it seems like storing the lessoninfo in a
-/// HashMap with the Id as a key is enough. Unless somehow we need to figure out the Id from the
-/// lessoninfo? I can't think of a scenario where that's necessary. If we make this private, we
-/// might rename it to SerializableLesson or something, so that the use is clearer.
-#[derive(Debug, Clone)]
-pub struct Lesson {
-    /// A unique `Id`, used to identify this lessson as a prerequisite of other lessons if
-    /// necessary.
-    id: Id,
-    pub name: String,
-    /// The list of all prerequisite lessons, identified by their `id`.
-    pub direct_prerequisites: Vec<Id>,
-    pub status: LessonStatus,
-}
-
 /// used to serialize the ids of the prerequisite lessons.
 fn ids_to_bytes(ids: &Vec<Id>) -> Vec<u8> {
     let mut writer = vec![];
@@ -218,25 +199,11 @@ fn ids_from_bytes(bytes: &Vec<u8>) -> Vec<Id> {
     output
 }
 
-impl Lesson {
-    pub fn get_id(&self) -> Id {
-        self.id
-    }
-
-    pub fn to_lesson_info(&self) -> LessonInfo {
-        LessonInfo {
-            name: self.name.clone(),
-            direct_prerequisites: self.direct_prerequisites.clone(),
-            status: self.status,
-        }
-    }
-}
-
 /// A runtime node of the graph structure.
 #[derive(Debug, Clone)]
 pub struct GraphNode {
     /// The actual lesson represented by the `GraphNode`.
-    pub lesson: Lesson,
+    pub lesson: LessonInfo,
     pub status: NodeStatus,
 }
 
@@ -266,21 +233,23 @@ impl<T: IOBackend> Graph<T> {
         for &parent in &lesson_info.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().push(id);
         }
-        let lesson = Lesson {
-            id,
+        let lesson = LessonInfo {
             name: lesson_info.name,
             direct_prerequisites: lesson_info.direct_prerequisites,
             status: lesson_info.status,
         };
         let node_status = self.compute_node_status(&lesson.direct_prerequisites, &lesson.status);
 
-        self.io_backend.add_new_lesson(&lesson).unwrap();
+        self.io_backend.add_new_lesson(id, &lesson).unwrap();
 
-        self.children.insert(lesson.id, vec![]);
-        self.nodes.insert(lesson.id, GraphNode {
-            lesson,
-            status: node_status,
-        });
+        self.children.insert(id, vec![]);
+        self.nodes.insert(
+            id,
+            GraphNode {
+                lesson,
+                status: node_status,
+            },
+        );
 
         debug!("End node creation, with Id {}", id);
         id
@@ -293,7 +262,10 @@ impl<T: IOBackend> Graph<T> {
 
         // we remove the id from the list of children of its prerequisites
         for prereq in node.lesson.direct_prerequisites {
-            self.children.get_mut(&prereq).unwrap().retain(|&child| child != id);
+            self.children
+                .get_mut(&prereq)
+                .unwrap()
+                .retain(|&child| child != id);
         }
 
         // we remove the id from the direct prerequisites list of its children, and also do it in
@@ -301,19 +273,28 @@ impl<T: IOBackend> Graph<T> {
         let children = self.children.remove(&id).unwrap();
         for &child_id in &children {
             let child = self.nodes.get_mut(&child_id).unwrap();
-            child.lesson.direct_prerequisites.retain(|&parent| parent != id);
-            self.io_backend.update_existing_lesson(&Lesson {
-                id: child_id,
-                name: child.lesson.name.clone(),
-                direct_prerequisites: child.lesson.direct_prerequisites.clone(),
-                status: child.lesson.status,
-            }).expect("the database child update to work");
+            child
+                .lesson
+                .direct_prerequisites
+                .retain(|&parent| parent != id);
+            self.io_backend
+                .update_existing_lesson(
+                    child_id,
+                    &LessonInfo {
+                        name: child.lesson.name.clone(),
+                        direct_prerequisites: child.lesson.direct_prerequisites.clone(),
+                        status: child.lesson.status,
+                    },
+                )
+                .expect("the database child update to work");
         }
 
         for &child_id in &children {
             self.update_lesson_status(child_id);
         }
-        self.io_backend.remove_lesson(id).expect("the database delete to work");
+        self.io_backend
+            .remove_lesson(id)
+            .expect("the database delete to work");
     }
 
     /// this function is called when a node is edited. It is useful if a lesson has a new
@@ -323,8 +304,10 @@ impl<T: IOBackend> Graph<T> {
         let lesson_status = &self.nodes.get(&id).unwrap().lesson.status;
         let old_lesson_status = self.nodes.get(&id).unwrap().status.clone();
 
-        let new_lesson_status =
-            self.compute_node_status(&self.nodes.get(&id).unwrap().lesson.direct_prerequisites, lesson_status);
+        let new_lesson_status = self.compute_node_status(
+            &self.nodes.get(&id).unwrap().lesson.direct_prerequisites,
+            lesson_status,
+        );
 
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
@@ -342,7 +325,10 @@ impl<T: IOBackend> Graph<T> {
     pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) {
         // for a simple update of the parents/children relationship, we just wipe the slate clean
         // and then we rewrite everything with the updated values
-        debug!("editing node with Id {} and lesson_info {:?}", id, lesson_info);
+        debug!(
+            "editing node with Id {} and lesson_info {:?}",
+            id, lesson_info
+        );
         for &parent in &self.nodes.get(&id).unwrap().lesson.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
@@ -351,25 +337,31 @@ impl<T: IOBackend> Graph<T> {
         }
 
         self.io_backend
-            .update_existing_lesson(&Lesson {
+            .update_existing_lesson(
                 id,
-                name: lesson_info.name.clone(),
-                direct_prerequisites: lesson_info.direct_prerequisites.clone(),
-                status: lesson_info.status,
-            })
+                &LessonInfo {
+                    name: lesson_info.name.clone(),
+                    direct_prerequisites: lesson_info.direct_prerequisites.clone(),
+                    status: lesson_info.status,
+                },
+            )
             .unwrap();
 
         self.nodes.get_mut(&id).unwrap().lesson.name = lesson_info.name;
-        self.nodes.get_mut(&id).unwrap().lesson.direct_prerequisites = lesson_info.direct_prerequisites;
+        self.nodes.get_mut(&id).unwrap().lesson.direct_prerequisites =
+            lesson_info.direct_prerequisites;
         self.nodes.get_mut(&id).unwrap().lesson.status = lesson_info.status;
 
         self.update_lesson_status(id);
         debug!("End edit for node {}", id);
     }
 
-    pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<&GraphNode> {
-        self.nodes.values().filter(|node| matches!(node.status, NodeStatus::Pending))
+    pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Id> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| matches!(node.status, NodeStatus::Pending))
             .choose(rng)
+            .map(|(id, _)| *id)
     }
 
     pub fn perform_search(&self, search_request: String) -> impl Iterator<Item = &GraphNode> {
@@ -410,6 +402,10 @@ impl<T: IOBackend> Graph<T> {
         self.nodes.values()
     }
 
+    pub fn get_ids(&self) -> Vec<Id> {
+        self.nodes.keys().copied().collect()
+    }
+
     pub fn lessons(&self) -> &HashMap<Id, GraphNode> {
         &self.nodes
     }
@@ -445,7 +441,7 @@ impl<T: IOBackend> Graph<T> {
     }
 
     pub fn get_children(&self, id: &Id) -> &[Id] {
-        self.children.get(&id).unwrap()
+        self.children.get(id).unwrap()
     }
 }
 
@@ -455,7 +451,7 @@ impl<T: IOBackend> Graph<T> {
 /// `Some`.
 #[derive(Debug, Default)]
 struct GraphBuilder<Backend: IOBackend> {
-    lessons: HashMap<Id, (Lesson, Option<NodeStatus>)>,
+    lessons: HashMap<Id, (LessonInfo, Option<NodeStatus>)>,
     backend: Backend,
 }
 
@@ -472,14 +468,17 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
         for (id, (lesson, _)) in &self.lessons {
             max_id = match max_id {
                 None => Some(*id),
-                Some(current_max) => Some(std::cmp::max(current_max, *id))
+                Some(current_max) => Some(std::cmp::max(current_max, *id)),
             };
             for &parent in &lesson.direct_prerequisites {
                 // technically we dont need the or_insert, but ill keep it out of laziness.
-                children.entry(parent).and_modify(|list: &mut Vec<Id>| list.push(lesson.id)).or_insert(vec![lesson.id]);
+                children
+                    .entry(parent)
+                    .and_modify(|list: &mut Vec<Id>| list.push(*id))
+                    .or_insert(vec![*id]);
             }
         }
-        
+
         Graph {
             next_id: match max_id {
                 None => 0,
@@ -488,12 +487,15 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             nodes: self
                 .lessons
                 .into_iter()
-                .map(|(id, (lesson, status))| 
-                    (id, 
-                    GraphNode {
-                    lesson,
-                    status: status.unwrap(),
-                }))
+                .map(|(id, (lesson, status))| {
+                    (
+                        id,
+                        GraphNode {
+                            lesson,
+                            status: status.unwrap(),
+                        },
+                    )
+                })
                 .collect(),
             children,
             io_backend: self.backend,
@@ -503,7 +505,10 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
     fn load_from_database(backend: Backend) -> Result<Self, Backend::Error> {
         let lessons = backend.query_lessons()?;
         Ok(Self {
-            lessons: lessons.into_iter().map(|(id, lesson)| (id, (lesson, None))).collect(),
+            lessons: lessons
+                .into_iter()
+                .map(|(id, lesson)| (id, (lesson, None)))
+                .collect(),
             backend,
         })
     }
@@ -522,7 +527,13 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
             return NodeStatus::Ok;
         }
 
-        let prereqs = self.lessons.get(&id).unwrap().0.direct_prerequisites.clone();
+        let prereqs = self
+            .lessons
+            .get(&id)
+            .unwrap()
+            .0
+            .direct_prerequisites
+            .clone();
         let mut missing_prereqs = vec![];
         for prereq_id in prereqs {
             if self.get_status(prereq_id) != NodeStatus::Ok {
@@ -558,21 +569,21 @@ mod tests {
     use super::*;
 
     struct DummyIOBackend {
-        lessons: HashMap<Id, Lesson>,
+        lessons: HashMap<Id, LessonInfo>,
     }
 
     impl IOBackend for DummyIOBackend {
         type Error = ();
 
-        fn query_lessons(&self) -> Result<HashMap<Id, Lesson>, Self::Error> {
+        fn query_lessons(&self) -> Result<HashMap<Id, LessonInfo>, Self::Error> {
             Ok(self.lessons.clone())
         }
 
-        fn add_new_lesson(&self, _lesson: &Lesson) -> Result<(), Self::Error> {
+        fn add_new_lesson(&self, _id: Id, _lesson: &LessonInfo) -> Result<(), Self::Error> {
             Ok(())
         }
 
-        fn update_existing_lesson(&self, _lesson: &Lesson) -> Result<(), Self::Error> {
+        fn update_existing_lesson(&self, _id: Id, _lesson: &LessonInfo) -> Result<(), Self::Error> {
             Ok(())
         }
 
@@ -583,39 +594,38 @@ mod tests {
 
     fn test_dummy_backend() -> DummyIOBackend {
         let lessons_vec = vec![
-            Lesson {
-                id: 0,
+            LessonInfo {
                 name: String::from("Test 0"),
                 direct_prerequisites: vec![1],
                 status: LessonStatus::NotPracticed,
             },
-            Lesson {
-                id: 1,
+            LessonInfo {
                 name: String::from("Test 1"),
                 direct_prerequisites: vec![],
                 status: LessonStatus::GoodEnough,
             },
-            Lesson {
-                id: 2,
+            LessonInfo {
                 name: String::from("Test 2"),
                 direct_prerequisites: vec![1, 0, 3],
                 status: LessonStatus::GoodEnough,
             },
-            Lesson {
-                id: 3,
+            LessonInfo {
                 name: String::from("Test 3"),
                 direct_prerequisites: vec![0],
                 status: LessonStatus::NotPracticed,
             },
-            Lesson {
-                id: 4,
+            LessonInfo {
                 name: String::from("Test 4"),
                 direct_prerequisites: vec![2],
                 status: LessonStatus::NotPracticed,
             },
         ];
 
-        let lessons = lessons_vec.into_iter().map(|lesson| (lesson.id, lesson)).collect();
+        let lessons = lessons_vec
+            .into_iter()
+            .enumerate()
+            .map(|(id, lesson)| (id as u64, lesson))
+            .collect();
 
         DummyIOBackend { lessons }
     }
@@ -638,10 +648,9 @@ mod tests {
         }
     }
 
-    impl PartialEq for Lesson {
+    impl PartialEq for LessonInfo {
         fn eq(&self, other: &Self) -> bool {
-            self.id == other.id
-                && self.name == other.name
+            self.name == other.name
                 && self.direct_prerequisites == other.direct_prerequisites
                 && self.status == other.status
         }
@@ -661,8 +670,7 @@ mod tests {
 
         let nodes = vec![
             GraphNode {
-                lesson: Lesson {
-                    id: 0,
+                lesson: LessonInfo {
                     name: String::from("Test 0"),
                     direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
@@ -670,8 +678,7 @@ mod tests {
                 status: NodeStatus::Pending,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 1,
+                lesson: LessonInfo {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
@@ -679,8 +686,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 2,
+                lesson: LessonInfo {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
@@ -688,8 +694,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 3,
+                lesson: LessonInfo {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
@@ -697,8 +702,7 @@ mod tests {
                 status: NodeStatus::MissingPrereq(vec![0]),
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 4,
+                lesson: LessonInfo {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
@@ -707,7 +711,11 @@ mod tests {
             },
         ];
 
-        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
+        let nodes = nodes
+            .into_iter()
+            .enumerate()
+            .map(|(id, node)| (id as u64, node))
+            .collect();
 
         assert_eq!(g.nodes, nodes)
     }
@@ -720,8 +728,7 @@ mod tests {
 
         let nodes = vec![
             GraphNode {
-                lesson: Lesson {
-                    id: 0,
+                lesson: LessonInfo {
                     name: String::from("Test 0"),
                     direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
@@ -729,8 +736,7 @@ mod tests {
                 status: NodeStatus::Pending,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 1,
+                lesson: LessonInfo {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
@@ -738,8 +744,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 2,
+                lesson: LessonInfo {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
@@ -747,8 +752,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 3,
+                lesson: LessonInfo {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
@@ -756,8 +760,7 @@ mod tests {
                 status: NodeStatus::MissingPrereq(vec![0]),
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 4,
+                lesson: LessonInfo {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
@@ -765,8 +768,7 @@ mod tests {
                 status: NodeStatus::Pending,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 5,
+                lesson: LessonInfo {
                     name: String::from("Test 5"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
@@ -774,8 +776,7 @@ mod tests {
                 status: NodeStatus::Pending,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 6,
+                lesson: LessonInfo {
                     name: String::from("Test 6"),
                     direct_prerequisites: vec![5, 2],
                     status: LessonStatus::NotPracticed,
@@ -796,7 +797,11 @@ mod tests {
             status: LessonStatus::NotPracticed,
         });
 
-        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
+        let nodes = nodes
+            .into_iter()
+            .enumerate()
+            .map(|(id, node)| (id as u64, node))
+            .collect();
 
         assert_eq!(g.nodes, nodes);
     }
@@ -809,8 +814,7 @@ mod tests {
 
         let nodes = vec![
             GraphNode {
-                lesson: Lesson {
-                    id: 0,
+                lesson: LessonInfo {
                     name: String::from("TEST 0"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
@@ -818,8 +822,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 1,
+                lesson: LessonInfo {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
@@ -827,8 +830,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 2,
+                lesson: LessonInfo {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
@@ -836,8 +838,7 @@ mod tests {
                 status: NodeStatus::Ok,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 3,
+                lesson: LessonInfo {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
@@ -845,8 +846,7 @@ mod tests {
                 status: NodeStatus::Pending,
             },
             GraphNode {
-                lesson: Lesson {
-                    id: 4,
+                lesson: LessonInfo {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
@@ -864,7 +864,11 @@ mod tests {
             },
         );
 
-        let nodes = nodes.into_iter().map(|node| (node.lesson.id, node)).collect();
+        let nodes = nodes
+            .into_iter()
+            .enumerate()
+            .map(|(id, node)| (id as u64, node))
+            .collect();
 
         assert_eq!(g.nodes, nodes);
     }

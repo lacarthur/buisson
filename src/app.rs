@@ -12,7 +12,10 @@ use ratatui::{
 
 use crate::{
     components::{
-        fuzzyfinder::{FuzzyFinder, FuzzyFinderAction}, lesson_edit_form::{LessonEditForm, LessonEditFormAction}, node_list::NodeList, study_editor::{StudyEditor, StudyEditorAction}
+        fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
+        lesson_edit_form::{LessonEditForm, LessonEditFormAction},
+        node_list::NodeList,
+        study_editor::{StudyEditor, StudyEditorAction},
     },
     lessons::{Graph, GraphNode, Id, LessonInfo, LessonStatus, SQLiteBackend},
     style_from_status,
@@ -59,7 +62,7 @@ impl App {
         let backend = SQLiteBackend::open(&database_path).map_err(AppError::SQLiteError)?;
 
         let lessons = Graph::get_from_database(backend).map_err(AppError::SQLiteError)?;
-        let lesson_ids = lessons.lessons_iter().map(|node| node.lesson.get_id()).collect();
+        let lesson_ids = lessons.get_ids();
 
         Ok(Self {
             lessons,
@@ -71,7 +74,7 @@ impl App {
 
     fn get_context(&self) -> Context<'_> {
         Context {
-            lessons: self.lessons.lessons()
+            lessons: self.lessons.lessons(),
         }
     }
 
@@ -80,8 +83,9 @@ impl App {
     }
 
     pub fn render(&self, area: Rect, frame: &mut Frame<'_>) {
-        let main_layout = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(area);
+        let main_layout =
+            Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(area);
         let left_panel = main_layout[0];
         let right_panel = main_layout[1];
 
@@ -118,7 +122,7 @@ impl App {
                 lesson.render(self.get_context(), right_panel_minus_bar, frame);
             }
             AppState::EditingLesson(_, lesson) => {
-                lesson.render(self.get_context(),right_panel_minus_bar, frame);
+                lesson.render(self.get_context(), right_panel_minus_bar, frame);
             }
             AppState::BrowsingLessons => {
                 self.render_side_panel(right_panel_minus_bar, frame);
@@ -129,12 +133,16 @@ impl App {
                 search_input.render(self.get_context(), fuzzy_finder_area, frame);
             }
             AppState::Studying(_, study_editor) => {
-                let horizontal_area = Layout::horizontal(Constraint::from_percentages([30, 40, 30])).split(area)[1];
-                let top_padding = (horizontal_area.height - 5)/2;
+                let horizontal_area =
+                    Layout::horizontal(Constraint::from_percentages([30, 40, 30])).split(area)[1];
+                let top_padding = (horizontal_area.height - 5) / 2;
                 let bottom_padding = horizontal_area.height - 5 - top_padding;
-                let vertical_area = Layout::vertical(Constraint::from_mins([top_padding, 5, bottom_padding])).split(horizontal_area)[1];
+                let vertical_area =
+                    Layout::vertical(Constraint::from_mins([top_padding, 5, bottom_padding]))
+                        .split(horizontal_area)[1];
 
-                let block = Block::new().title("Study")
+                let block = Block::new()
+                    .title("Study")
                     .borders(Borders::ALL)
                     .border_style(Style::default().bold());
 
@@ -153,15 +161,23 @@ impl App {
         }
     }
 
-    fn render_deletion_confirmation_popup(&self, id_to_delete: &Id, area: Rect, frame: &mut Frame<'_>) -> bool {
+    fn render_deletion_confirmation_popup(
+        &self,
+        id_to_delete: &Id,
+        area: Rect,
+        frame: &mut Frame<'_>,
+    ) -> bool {
         let children_id = self.lessons.get_children(id_to_delete);
-        
-        let confirmation_message = format!("Confirm deletion : {}", self.lessons.get(*id_to_delete).lesson.name);
+
+        let confirmation_message = format!(
+            "Confirm deletion : {}",
+            self.lessons.get(*id_to_delete).lesson.name
+        );
 
         let num_cols_needed: u16 = 2 // block border
                                  + 2 // some padding
                                  + unicode_width::UnicodeWidthStr::width(confirmation_message.as_str()) as u16;
-        
+
         let actual_width = area.width - 4;
         let popup_width = std::cmp::min(actual_width, num_cols_needed);
         let padding_left = (area.width - popup_width) / 2;
@@ -171,7 +187,8 @@ impl App {
             Constraint::Length(padding_left),
             Constraint::Length(popup_width),
             Constraint::Length(padding_right),
-        ]).split(area)[1];
+        ])
+        .split(area)[1];
 
         if area.height < 4 {
             return false;
@@ -186,7 +203,8 @@ impl App {
                 Constraint::Length(2),
                 Constraint::Length(4),
                 Constraint::Length(2),
-            ]).split(vertical_area)[1];
+            ])
+            .split(vertical_area)[1];
 
             let lines = vec![
                 Line::from(vec![Span::raw(confirmation_message)]),
@@ -203,7 +221,8 @@ impl App {
                 Constraint::Length(padding_top),
                 Constraint::Length(5),
                 Constraint::Length(padding_bottom),
-            ]).split(vertical_area)[1];
+            ])
+            .split(vertical_area)[1];
 
             let lines = vec![
                 Line::from(vec![Span::raw(confirmation_message)]),
@@ -221,11 +240,15 @@ impl App {
                 Constraint::Length(padding_top),
                 Constraint::Length(5),
                 Constraint::Length(padding_bottom),
-            ]).split(vertical_area)[1];
+            ])
+            .split(vertical_area)[1];
 
             let lines = vec![
                 Line::from(vec![Span::raw(confirmation_message)]),
-                Line::from(vec![Span::raw(format!("There are {} lessons depending on it", children_id.len()))]),
+                Line::from(vec![Span::raw(format!(
+                    "There are {} lessons depending on it",
+                    children_id.len()
+                ))]),
                 Line::from(vec![Span::raw("Y/n")]),
             ];
             frame.render_widget(Clear, popup_area);
@@ -239,11 +262,15 @@ impl App {
                 Constraint::Length(padding_top),
                 Constraint::Length(6),
                 Constraint::Length(padding_bottom),
-            ]).split(vertical_area)[1];
+            ])
+            .split(vertical_area)[1];
 
             let lines = vec![
                 Line::from(vec![Span::raw(confirmation_message)]),
-                Line::from(vec![Span::raw(format!("There are {} lessons depending on it", children_id.len()))]),
+                Line::from(vec![Span::raw(format!(
+                    "There are {} lessons depending on it",
+                    children_id.len()
+                ))]),
                 Line::default(),
                 Line::from(vec![Span::raw("Y/n")]),
             ];
@@ -260,7 +287,8 @@ impl App {
                 Constraint::Length(padding_top),
                 Constraint::Length(height_needed),
                 Constraint::Length(padding_bottom),
-            ]).split(vertical_area)[1];
+            ])
+            .split(vertical_area)[1];
 
             let mut lines = vec![
                 Line::from(vec![Span::raw(confirmation_message)]),
@@ -284,10 +312,18 @@ impl App {
         true
     }
 
-    fn render_status_line_deletion_confirmation(&self, id_to_delete: &Id, area: Rect, frame: &mut Frame<'_>) {
+    fn render_status_line_deletion_confirmation(
+        &self,
+        id_to_delete: &Id,
+        area: Rect,
+        frame: &mut Frame<'_>,
+    ) {
         frame.render_widget(
-            Text::from(format!("Confirm deletion of lesson \"{}\"? Y/n", self.lessons.get(*id_to_delete).lesson.name)), 
-            area
+            Text::from(format!(
+                "Confirm deletion of lesson \"{}\"? Y/n",
+                self.lessons.get(*id_to_delete).lesson.name
+            )),
+            area,
         )
     }
 
@@ -320,12 +356,12 @@ impl App {
             .border_style(style.bold())
             .borders(Borders::ALL);
 
-        let widget = Paragraph::new(text)
-            .style(Style::new().white());
-        
+        let widget = Paragraph::new(text).style(Style::new().white());
+
         let inner = block.inner(area);
 
-        let layout = Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(inner);
+        let layout =
+            Layout::vertical([Constraint::Percentage(100), Constraint::Min(1)]).split(inner);
 
         frame.render_widget(block, area);
 
@@ -381,18 +417,23 @@ impl App {
             .borders(Borders::ALL)
             .style(border_style);
 
-        let list_widget= List::new(self.main_list.ids().iter()
-            .map(|id| {
-                let node = self.lessons.get(*id);
-                let text = Text::from(node.lesson.name.as_str());
-                ListItem::new(text).style(style_from_status(&node.status))
-            })
-        ).block(block)
+        let list_widget = List::new(self.main_list.ids().iter().map(|id| {
+            let node = self.lessons.get(*id);
+            let text = Text::from(node.lesson.name.as_str());
+            ListItem::new(text).style(style_from_status(&node.status))
+        }))
+        .block(block)
         .highlight_style(Style::default().reversed());
 
         match self.state {
-            AppState::BrowsingLessons | AppState::EditingLesson(_, _) | AppState::Studying(_, _) => {
-                frame.render_stateful_widget(list_widget, area, &mut self.main_list.list_state_refcell().borrow_mut());
+            AppState::BrowsingLessons
+            | AppState::EditingLesson(_, _)
+            | AppState::Studying(_, _) => {
+                frame.render_stateful_widget(
+                    list_widget,
+                    area,
+                    &mut self.main_list.list_state_refcell().borrow_mut(),
+                );
             }
             _ => {
                 frame.render_widget(list_widget, area);
@@ -441,31 +482,35 @@ impl App {
                     }
                 }
             }
-            AppState::Studying(id, study_editor) => {
-                match study_editor.handle_key(key) {
-                    StudyEditorAction::Terminate(Some(lesson_status)) => {
-                        let name = self.lessons.get(*id).lesson.name.clone();
-                        let direct_prerequisites = self.lessons.get(*id).lesson.direct_prerequisites.clone();
-                        self.lessons.edit_node(*id, LessonInfo { name, direct_prerequisites, status: lesson_status });
-                        self.state = AppState::BrowsingLessons;
-                    }
-                    StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
-                    StudyEditorAction::Noop => (),
+            AppState::Studying(id, study_editor) => match study_editor.handle_key(key) {
+                StudyEditorAction::Terminate(Some(lesson_status)) => {
+                    let name = self.lessons.get(*id).lesson.name.clone();
+                    let direct_prerequisites =
+                        self.lessons.get(*id).lesson.direct_prerequisites.clone();
+                    self.lessons.edit_node(
+                        *id,
+                        LessonInfo {
+                            name,
+                            direct_prerequisites,
+                            status: lesson_status,
+                        },
+                    );
+                    self.state = AppState::BrowsingLessons;
                 }
-            }
-            AppState::ConfirmingDeletion(id) => {
-                match key.code {
-                    KeyCode::Char('Y') => {
-                        self.main_list.remove_node(*id);
-                        self.lessons.delete_node(*id);
-                        self.state = AppState::BrowsingLessons;
-                    }
-                    KeyCode::Char('n') | KeyCode::Esc => {
-                        self.state = AppState::BrowsingLessons;
-                    }
-                    _ => (),
+                StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
+                StudyEditorAction::Noop => (),
+            },
+            AppState::ConfirmingDeletion(id) => match key.code {
+                KeyCode::Char('Y') => {
+                    self.main_list.remove_node(*id);
+                    self.lessons.delete_node(*id);
+                    self.state = AppState::BrowsingLessons;
                 }
-            }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.state = AppState::BrowsingLessons;
+                }
+                _ => (),
+            },
             AppState::Quitting => (),
         }
     }
@@ -475,15 +520,21 @@ impl App {
             KeyCode::Char('q') => self.state = AppState::Quitting,
             KeyCode::Char('a') => {
                 self.state = AppState::AddingNewLesson(LessonEditForm::new(
-                    self.lessons.lessons().iter()
-                    .map(|(id,node)| (*id, node.lesson.to_lesson_info())).
-                    collect(),
+                    self.lessons
+                        .lessons()
+                        .iter()
+                        .map(|(id, node)| (*id, node.lesson.clone()))
+                        .collect(),
                     LessonInfo::default(),
                 ))
             }
             KeyCode::Char('/') => {
                 self.state = AppState::Searching(FuzzyFinder::new(
-                    self.lessons.lessons().iter().map(|(id, node)| (*id, node.lesson.to_lesson_info())).collect(),
+                    self.lessons
+                        .lessons()
+                        .iter()
+                        .map(|(id, node)| (*id, node.lesson.clone()))
+                        .collect(),
                 ))
             }
             KeyCode::Char('d') => {
@@ -494,26 +545,34 @@ impl App {
             KeyCode::Char('e') => {
                 if let Some(currently_selected) = self.main_list.currently_selected_id() {
                     let form = LessonEditForm::new(
-                        self.lessons.lessons().iter()
-                        .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected))
-                        .map(|(id, node)| (*id, node.lesson.to_lesson_info()))
-                        .collect(),
-                        self.lessons.get(currently_selected).lesson.to_lesson_info(),
+                        self.lessons
+                            .lessons()
+                            .iter()
+                            .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected))
+                            .map(|(id, node)| (*id, node.lesson.clone()))
+                            .collect(),
+                        self.lessons.get(currently_selected).lesson.clone(),
                     );
-                    self.state =
-                        AppState::EditingLesson(currently_selected, form);
+                    self.state = AppState::EditingLesson(currently_selected, form);
                 }
             }
             KeyCode::Char('l') => {
                 if let Some(currently_selected_id) = self.main_list.currently_selected_id() {
-                    let status = self.lessons.lessons().get(&currently_selected_id).unwrap().lesson.status;
+                    let status = self
+                        .lessons
+                        .lessons()
+                        .get(&currently_selected_id)
+                        .unwrap()
+                        .lesson
+                        .status;
 
-                    self.state = AppState::Studying(currently_selected_id, StudyEditor::new(status));
+                    self.state =
+                        AppState::Studying(currently_selected_id, StudyEditor::new(status));
                 }
             }
             KeyCode::Char('r') => {
-                if let Some(node) = self.lessons.random_pending(&mut self.rng) {
-                    self.main_list.select(node.lesson.get_id());
+                if let Some(id) = self.lessons.random_pending(&mut self.rng) {
+                    self.main_list.select(id);
                 }
             }
             _ => self.main_list.handle_key(key),
