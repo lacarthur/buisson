@@ -2,7 +2,6 @@
 members = [
     "buisson-common",
     "buisson-tui",
-    "buisson-leptos",
 ]
 resolver = "2"
 
