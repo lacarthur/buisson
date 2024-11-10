@@ -42,6 +42,8 @@ pub enum LessonStatus {
 }
 
 impl LessonStatus {
+    /// Whether or not a lesson is considered "known", irrespective of whether or not its
+    /// prerequisites' status
     fn needs_work(&self) -> bool {
         match &self {
             LessonStatus::GoodEnough => false,
@@ -76,6 +78,8 @@ pub enum NodeStatus {
     Pending,
 }
 
+/// A struct to represent a lesson in the app. Contains every information about the lesson that we
+/// know.
 #[derive(Debug, Clone, Default)]
 pub struct LessonInfo {
     pub name: String,
@@ -84,7 +88,7 @@ pub struct LessonInfo {
     pub status: LessonStatus,
 }
 
-/// A runtime node of the graph structure.
+/// A runtime node of the graph structure. Contains a lesson and additional runtime info.
 #[derive(Debug, Clone)]
 pub struct GraphNode {
     /// The actual lesson represented by the `GraphNode`.
@@ -101,6 +105,7 @@ pub struct Graph<T: IOBackend> {
     /// in memory to help with updating the nodes at runtime. It is not stored to the disk and is
     /// instead computed at the start of the program and updated throughout
     children: HashMap<Id, Vec<Id>>,
+    /// the next id to give to a newly created node.
     next_id: Id,
 
     io_backend: T,
@@ -111,7 +116,6 @@ impl<T: IOBackend> Graph<T> {
     /// public facing function, and should be able to be called without altering the correctness of
     /// the state of `self`. It also returns the Id of the newly created node.
     pub fn create_new_node(&mut self, lesson_info: LessonInfo) -> Id {
-        debug!("Creating node for {:?}", lesson_info);
         let id = self.next_id;
         self.next_id += 1;
 
@@ -136,7 +140,6 @@ impl<T: IOBackend> Graph<T> {
             },
         );
 
-        debug!("End node creation, with Id {}", id);
         id
     }
 
@@ -175,21 +178,21 @@ impl<T: IOBackend> Graph<T> {
         }
 
         for &child_id in &children {
-            self.update_lesson_status(child_id);
+            self.update_node_status(child_id);
         }
         self.io_backend
             .remove_lesson(id)
             .expect("the database delete to work");
     }
 
-    /// this function is called when a node is edited. It is useful if a lesson has a new
-    /// prerequisite, its status may need updating. It is only the runtime status though.
-    fn update_lesson_status(&mut self, id: Id) {
-        debug!("Updating status of node {}", id);
+    /// Compute the runtime status of the node with id `id` in the graph, and updates the current
+    /// value. If the value has changed, calls itself on the children of the node whose status we
+    /// just modified, as their status depends on the status of `id`.
+    fn update_node_status(&mut self, id: Id) {
         let lesson_status = &self.nodes.get(&id).unwrap().lesson.status;
-        let old_lesson_status = self.nodes.get(&id).unwrap().status.clone();
+        let old_node_status = self.nodes.get(&id).unwrap().status.clone();
 
-        let new_lesson_status = self.compute_node_status(
+        let new_node_status = self.compute_node_status(
             &self.nodes.get(&id).unwrap().lesson.direct_prerequisites,
             lesson_status,
         );
@@ -197,23 +200,20 @@ impl<T: IOBackend> Graph<T> {
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
         // function.
-        if old_lesson_status != new_lesson_status {
-            self.nodes.get_mut(&id).unwrap().status = new_lesson_status;
-            debug!("Children: {:?}", &self.children);
+        if old_node_status != new_node_status {
+            self.nodes.get_mut(&id).unwrap().status = new_node_status;
             for &child in &self.children.get(&id).unwrap().clone() {
-                self.update_lesson_status(child);
+                self.update_node_status(child);
             }
         }
-        debug!("End update for node {}", id);
     }
 
+    /// Edit the lesson with id `id`, replacing its info with `lesson_info`. This function also
+    /// maintains the correctness of the state, by updating runtime info to reflect the new value
+    /// for the lesson info.
     pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) {
         // for a simple update of the parents/children relationship, we just wipe the slate clean
         // and then we rewrite everything with the updated values
-        debug!(
-            "editing node with Id {} and lesson_info {:?}",
-            id, lesson_info
-        );
         for &parent in &self.nodes.get(&id).unwrap().lesson.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
@@ -237,10 +237,11 @@ impl<T: IOBackend> Graph<T> {
             lesson_info.direct_prerequisites;
         self.nodes.get_mut(&id).unwrap().lesson.status = lesson_info.status;
 
-        self.update_lesson_status(id);
-        debug!("End edit for node {}", id);
+        self.update_node_status(id);
     }
 
+    /// Return the id of a lesson chosen uniformly among all pending lessons. In case there are
+    /// no pending lessons, returns `None`.
     pub fn random_pending<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<Id> {
         self.nodes
             .iter()
@@ -249,6 +250,7 @@ impl<T: IOBackend> Graph<T> {
             .map(|(id, _)| *id)
     }
 
+    /// Return an iterator with only the lessons whose name contain the string `search_request`.
     pub fn perform_search(&self, search_request: String) -> impl Iterator<Item = &GraphNode> {
         self.lessons_iter()
             .filter(move |&node| node.lesson.name.contains(&search_request))
@@ -279,30 +281,35 @@ impl<T: IOBackend> Graph<T> {
     pub fn get_from_database(backend: T) -> Result<Self, T::Error> {
         let builder = GraphBuilder::load_from_database(backend)?;
         let ret = builder.into_graph();
-        debug!("Initial children: {:?}", &ret.children);
         Ok(ret)
     }
 
+    /// Return an iterator of all lessons in the `Graph`
     pub fn lessons_iter(&self) -> impl Iterator<Item = &GraphNode> {
         self.nodes.values()
     }
 
+    /// Return an owned `Vec` of all the ids of nodes in the graph
     pub fn get_ids(&self) -> Vec<Id> {
         self.nodes.keys().copied().collect()
     }
 
+    /// Return the map between ids and nodes
     pub fn lessons(&self) -> &HashMap<Id, GraphNode> {
         &self.nodes
     }
 
+    /// retrieve node with id `id`
     pub fn get(&self, id: Id) -> &GraphNode {
         self.nodes.get(&id).unwrap()
     }
 
+    /// Return how many nodes are contained in the graph
     pub fn num_nodes(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Return how many nodes are OK (i.e. don't need work)
     pub fn num_ok_nodes(&self) -> usize {
         self.nodes
             .values()
@@ -356,11 +363,9 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
                 Some(current_max) => Some(std::cmp::max(current_max, *id)),
             };
             for &parent in &lesson.direct_prerequisites {
-                // technically we dont need the or_insert, but ill keep it out of laziness.
                 children
                     .entry(parent)
-                    .and_modify(|list: &mut Vec<Id>| list.push(*id))
-                    .or_insert(vec![*id]);
+                    .and_modify(|list: &mut Vec<Id>| list.push(*id));
             }
         }
 
@@ -387,6 +392,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
         }
     }
 
+    /// Retrieve the data from the database in `backend`
     fn load_from_database(backend: Backend) -> Result<Self, Backend::Error> {
         let lessons = backend.query_lessons()?;
         Ok(Self {
