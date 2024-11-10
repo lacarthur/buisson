@@ -6,11 +6,11 @@ description.workspace = true
 
 [dependencies]
 cli-log = "2.0.0"
-crossterm = "0.28.1"
-ratatui = "0.28.1"
+crossterm = "0.28.*"
+ratatui = "0.29.*"
 buisson-common = { path = "../buisson-common" }
 xdg = "2.5.2"
-rusqlite = "0.32.1"
+rusqlite = "0.32.*"
 chrono = "0.4.38"
 unicode-width = "0.2.0"
 rand = "0.8.5"
