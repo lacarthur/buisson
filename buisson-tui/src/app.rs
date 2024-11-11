@@ -10,6 +10,8 @@ use ratatui::{
     Frame,
 };
 
+const DB_FILENAME: &str = "lessons_dev.sqlite";
+
 use crate::{
     components::{
         fuzzyfinder::{FuzzyFinder, FuzzyFinderAction},
@@ -59,7 +61,7 @@ impl App {
             xdg::BaseDirectories::with_prefix("buisson").map_err(AppError::XDGError)?;
         let data_path = directories.get_data_home();
         std::fs::create_dir_all(data_path).map_err(AppError::IOError)?;
-        let database_path = directories.get_data_home().join("lessons.sqlite");
+        let database_path = directories.get_data_home().join(DB_FILENAME);
 
         let backend = SQLiteBackend::open(&database_path).map_err(AppError::SQLiteError)?;
 
