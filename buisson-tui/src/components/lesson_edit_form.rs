@@ -63,6 +63,7 @@ impl LessonEditForm {
             name: self.name_input.text().into(),
             direct_prerequisites: self.prerequisites.ids().into(),
             status: self.lesson_status,
+            tags: vec![],
         }
     }
 }

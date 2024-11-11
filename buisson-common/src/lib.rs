@@ -86,6 +86,7 @@ pub struct LessonInfo {
     /// The list of all prerequisite lessons, identified by their `id`.
     pub direct_prerequisites: Vec<Id>,
     pub status: LessonStatus,
+    pub tags: Vec<String>,
 }
 
 /// A runtime node of the graph structure. Contains a lesson and additional runtime info.
@@ -122,20 +123,15 @@ impl<T: IOBackend> Graph<T> {
         for &parent in &lesson_info.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().push(id);
         }
-        let lesson = LessonInfo {
-            name: lesson_info.name,
-            direct_prerequisites: lesson_info.direct_prerequisites,
-            status: lesson_info.status,
-        };
-        let node_status = self.compute_node_status(&lesson.direct_prerequisites, &lesson.status);
+        let node_status = self.compute_node_status(&lesson_info.direct_prerequisites, &lesson_info.status);
 
-        self.io_backend.add_new_lesson(id, &lesson).unwrap();
+        self.io_backend.add_new_lesson(id, &lesson_info).unwrap();
 
         self.children.insert(id, vec![]);
         self.nodes.insert(
             id,
             GraphNode {
-                lesson,
+                lesson: lesson_info,
                 status: node_status,
             },
         );
@@ -168,11 +164,7 @@ impl<T: IOBackend> Graph<T> {
             self.io_backend
                 .update_existing_lesson(
                     child_id,
-                    &LessonInfo {
-                        name: child.lesson.name.clone(),
-                        direct_prerequisites: child.lesson.direct_prerequisites.clone(),
-                        status: child.lesson.status,
-                    },
+                    &child.lesson,
                 )
                 .expect("the database child update to work");
         }
@@ -224,11 +216,7 @@ impl<T: IOBackend> Graph<T> {
         self.io_backend
             .update_existing_lesson(
                 id,
-                &LessonInfo {
-                    name: lesson_info.name.clone(),
-                    direct_prerequisites: lesson_info.direct_prerequisites.clone(),
-                    status: lesson_info.status,
-                },
+                &lesson_info,
             )
             .unwrap();
 
@@ -489,26 +477,31 @@ mod tests {
                 name: String::from("Test 0"),
                 direct_prerequisites: vec![1],
                 status: LessonStatus::NotPracticed,
+                tags: vec![],
             },
             LessonInfo {
                 name: String::from("Test 1"),
                 direct_prerequisites: vec![],
                 status: LessonStatus::GoodEnough,
+                tags: vec![],
             },
             LessonInfo {
                 name: String::from("Test 2"),
                 direct_prerequisites: vec![1, 0, 3],
                 status: LessonStatus::GoodEnough,
+                tags: vec![],
             },
             LessonInfo {
                 name: String::from("Test 3"),
                 direct_prerequisites: vec![0],
                 status: LessonStatus::NotPracticed,
+                tags: vec![],
             },
             LessonInfo {
                 name: String::from("Test 4"),
                 direct_prerequisites: vec![2],
                 status: LessonStatus::NotPracticed,
+                tags: vec![],
             },
         ];
 
@@ -565,6 +558,7 @@ mod tests {
                     name: String::from("Test 0"),
                     direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -573,6 +567,7 @@ mod tests {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -581,6 +576,7 @@ mod tests {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -589,6 +585,7 @@ mod tests {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::MissingPrereq(vec![0]),
             },
@@ -597,6 +594,7 @@ mod tests {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -623,6 +621,7 @@ mod tests {
                     name: String::from("Test 0"),
                     direct_prerequisites: vec![1],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -631,6 +630,7 @@ mod tests {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -639,6 +639,7 @@ mod tests {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -647,6 +648,7 @@ mod tests {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::MissingPrereq(vec![0]),
             },
@@ -655,6 +657,7 @@ mod tests {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -663,6 +666,7 @@ mod tests {
                     name: String::from("Test 5"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -671,6 +675,7 @@ mod tests {
                     name: String::from("Test 6"),
                     direct_prerequisites: vec![5, 2],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::MissingPrereq(vec![5]),
             },
@@ -680,12 +685,14 @@ mod tests {
             name: String::from("Test 5"),
             direct_prerequisites: vec![2],
             status: LessonStatus::NotPracticed,
+            tags: vec![],
         });
 
         g.create_new_node(LessonInfo {
             name: String::from("Test 6"),
             direct_prerequisites: vec![5, 2],
             status: LessonStatus::NotPracticed,
+            tags: vec![],
         });
 
         let nodes = nodes
@@ -709,6 +716,7 @@ mod tests {
                     name: String::from("TEST 0"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -717,6 +725,7 @@ mod tests {
                     name: String::from("Test 1"),
                     direct_prerequisites: vec![],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -725,6 +734,7 @@ mod tests {
                     name: String::from("Test 2"),
                     direct_prerequisites: vec![1, 0, 3],
                     status: LessonStatus::GoodEnough,
+                    tags: vec![],
                 },
                 status: NodeStatus::Ok,
             },
@@ -733,6 +743,7 @@ mod tests {
                     name: String::from("Test 3"),
                     direct_prerequisites: vec![0],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -741,6 +752,7 @@ mod tests {
                     name: String::from("Test 4"),
                     direct_prerequisites: vec![2],
                     status: LessonStatus::NotPracticed,
+                    tags: vec![],
                 },
                 status: NodeStatus::Pending,
             },
@@ -752,6 +764,7 @@ mod tests {
                 name: String::from("TEST 0"),
                 direct_prerequisites: vec![],
                 status: LessonStatus::GoodEnough,
+                tags: vec![],
             },
         );
 

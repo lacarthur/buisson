@@ -89,6 +89,7 @@ impl IOBackend for SQLiteBackend {
                         name: row.get(1)?,
                         direct_prerequisites: ids_from_bytes(&row.get(2)?),
                         status: ron::from_str(&status_ron).unwrap(),
+                        tags: vec![],
                     },
                 ))
             })?

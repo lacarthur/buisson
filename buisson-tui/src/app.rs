@@ -497,6 +497,7 @@ impl App {
                             name,
                             direct_prerequisites,
                             status: lesson_status,
+                            tags: vec![],
                         },
                     );
                     self.state = AppState::BrowsingLessons;
