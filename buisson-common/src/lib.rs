@@ -115,7 +115,19 @@ pub struct Graph<T: IOBackend> {
 pub enum BuissonError<T: IOBackend> {
     /// the queried id is not present in the graph.
     MissingId(Id),
+    /// there was an error in the communication with the backend
     BackendError(T::Error),
+}
+
+impl<T: IOBackend> std::fmt::Display for BuissonError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuissonError::MissingId(id) => writeln!(f, "The id {id} is not present in the graph."),
+            BuissonError::BackendError(e) => {
+                writeln!(f, "Error while interacting with the backend : {:?}", e)
+            }
+        }
+    }
 }
 
 impl<T: IOBackend> Graph<T> {
@@ -131,9 +143,12 @@ impl<T: IOBackend> Graph<T> {
             // start with
             self.children.get_mut(&parent).unwrap().push(id);
         }
-        let node_status = self.compute_node_status(&lesson_info.direct_prerequisites, &lesson_info.status)?;
+        let node_status =
+            self.compute_node_status(&lesson_info.direct_prerequisites, &lesson_info.status)?;
 
-        self.io_backend.add_new_lesson(id, &lesson_info).map_err(BuissonError::BackendError)?;
+        self.io_backend
+            .add_new_lesson(id, &lesson_info)
+            .map_err(BuissonError::BackendError)?;
 
         self.children.insert(id, vec![]);
         self.nodes.insert(
@@ -149,16 +164,15 @@ impl<T: IOBackend> Graph<T> {
 
     /// Delete node with id `id`. Keeps the internal state consistent, removes the `id` from
     /// prerequisite lists of other nodes.
-    pub fn delete_node(&mut self, id: Id) -> Result<(), BuissonError<T>>{
-        let node = self.nodes.remove(&id)
-            .ok_or(BuissonError::MissingId(id))?;
+    pub fn delete_node(&mut self, id: Id) -> Result<(), BuissonError<T>> {
+        let node = self.nodes.remove(&id).ok_or(BuissonError::MissingId(id))?;
 
         // we remove the id from the list of children of its prerequisites
         for prereq in node.lesson.direct_prerequisites {
             self.children
                 .get_mut(&prereq)
                 .unwrap() // Ok to unwrap here, if there is an error it means the
-                                        // internal state was compromised.
+                // internal state was compromised.
                 .retain(|&child| child != id);
         }
 
@@ -172,10 +186,7 @@ impl<T: IOBackend> Graph<T> {
                 .direct_prerequisites
                 .retain(|&parent| parent != id);
             self.io_backend
-                .update_existing_lesson(
-                    child_id,
-                    &child.lesson,
-                )
+                .update_existing_lesson(child_id, &child.lesson)
                 .expect("the database child update to work");
         }
 
@@ -196,10 +207,8 @@ impl<T: IOBackend> Graph<T> {
         let lesson_status = node.lesson.status;
         let old_node_status = node.status.clone();
 
-        let new_node_status = self.compute_node_status(
-            &node.lesson.direct_prerequisites,
-            &lesson_status,
-        )?;
+        let new_node_status =
+            self.compute_node_status(&node.lesson.direct_prerequisites, &lesson_status)?;
 
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
@@ -220,8 +229,7 @@ impl<T: IOBackend> Graph<T> {
     pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) -> Result<(), BuissonError<T>> {
         // for a simple update of the parents/children relationship, we just wipe the slate clean
         // and then we rewrite everything with the updated values
-        let node = self.nodes.get(&id)
-            .ok_or(BuissonError::MissingId(id))?;
+        let node = self.nodes.get(&id).ok_or(BuissonError::MissingId(id))?;
         for &parent in &node.lesson.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
@@ -230,10 +238,7 @@ impl<T: IOBackend> Graph<T> {
         }
 
         self.io_backend
-            .update_existing_lesson(
-                id,
-                &lesson_info,
-            )
+            .update_existing_lesson(id, &lesson_info)
             .map_err(BuissonError::BackendError)?;
 
         self.nodes.get_mut(&id).unwrap().lesson.name = lesson_info.name;
@@ -264,7 +269,11 @@ impl<T: IOBackend> Graph<T> {
     /// this function is called when the statuses of all the prereqs have been computed. It
     /// computes the runtime status of a node whose lesson has prereqs `prereqs` and status
     /// `lesson_status`.
-    fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> Result<NodeStatus, BuissonError<T>> {
+    fn compute_node_status(
+        &self,
+        prereqs: &[Id],
+        lesson_status: &LessonStatus,
+    ) -> Result<NodeStatus, BuissonError<T>> {
         if let LessonStatus::GoodEnough = lesson_status {
             return Ok(NodeStatus::Ok);
         }
@@ -710,14 +719,16 @@ mod tests {
             direct_prerequisites: vec![2],
             status: LessonStatus::NotPracticed,
             tags: vec![],
-        }).unwrap();
+        })
+        .unwrap();
 
         g.create_new_node(LessonInfo {
             name: String::from("Test 6"),
             direct_prerequisites: vec![5, 2],
             status: LessonStatus::NotPracticed,
             tags: vec![],
-        }).unwrap();
+        })
+        .unwrap();
 
         let nodes = nodes
             .into_iter()
@@ -790,7 +801,8 @@ mod tests {
                 status: LessonStatus::GoodEnough,
                 tags: vec![],
             },
-        ).unwrap();
+        )
+        .unwrap();
 
         let nodes = nodes
             .into_iter()

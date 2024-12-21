@@ -488,18 +488,20 @@ impl App {
             }
             AppState::Studying(id, study_editor) => match study_editor.handle_key(key) {
                 StudyEditorAction::Terminate(Some(lesson_status)) => {
-                    let node  = self.lessons.get(*id).unwrap();
+                    let node = self.lessons.get(*id).unwrap();
                     let name = node.lesson.name.clone();
                     let direct_prerequisites = node.lesson.direct_prerequisites.clone();
-                    self.lessons.edit_node(
-                        *id,
-                        LessonInfo {
-                            name,
-                            direct_prerequisites,
-                            status: lesson_status,
-                            tags: vec![],
-                        },
-                    ).unwrap();
+                    self.lessons
+                        .edit_node(
+                            *id,
+                            LessonInfo {
+                                name,
+                                direct_prerequisites,
+                                status: lesson_status,
+                                tags: vec![],
+                            },
+                        )
+                        .unwrap();
                     self.state = AppState::BrowsingLessons;
                 }
                 StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
@@ -553,7 +555,9 @@ impl App {
                         self.lessons
                             .lessons()
                             .iter()
-                            .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected).unwrap())
+                            .filter(|(&id, _)| {
+                                !self.lessons.depends_on(id, currently_selected).unwrap()
+                            })
                             .map(|(id, node)| (*id, node.lesson.clone()))
                             .collect(),
                         self.lessons.get(currently_selected).unwrap().lesson.clone(),
