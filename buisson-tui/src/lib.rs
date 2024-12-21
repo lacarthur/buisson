@@ -18,6 +18,7 @@ pub fn style_from_status(status: &NodeStatus) -> Style {
     }
 }
 
+#[derive(Debug)]
 pub struct SQLiteBackend {
     connection: rusqlite::Connection,
 }

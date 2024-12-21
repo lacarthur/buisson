@@ -171,11 +171,11 @@ impl App {
         area: Rect,
         frame: &mut Frame<'_>,
     ) -> bool {
-        let children_id = self.lessons.get_children(id_to_delete);
+        let children_id = self.lessons.get_children(*id_to_delete).unwrap();
 
         let confirmation_message = format!(
             "Confirm deletion : {}",
-            self.lessons.get(*id_to_delete).lesson.name
+            self.lessons.get(*id_to_delete).unwrap().lesson.name
         );
 
         let num_cols_needed: u16 = 2 // block border
@@ -301,7 +301,7 @@ impl App {
             ];
 
             lines.extend(children_id.iter().map(|id| {
-                let child_node = self.lessons.get(*id);
+                let child_node = self.lessons.get(*id).unwrap();
                 Line::from(vec![Span::styled(
                     &child_node.lesson.name,
                     style_from_status(&child_node.status),
@@ -325,7 +325,7 @@ impl App {
         frame.render_widget(
             Text::from(format!(
                 "Confirm deletion of lesson \"{}\"? Y/n",
-                self.lessons.get(*id_to_delete).lesson.name
+                self.lessons.get(*id_to_delete).unwrap().lesson.name
             )),
             area,
         )
@@ -347,7 +347,7 @@ impl App {
         ];
 
         text.extend(node.lesson.direct_prerequisites.iter().map(|id| {
-            let prereq_node = self.lessons.get(*id);
+            let prereq_node = self.lessons.get(*id).unwrap();
             Line::from(vec![Span::styled(
                 &prereq_node.lesson.name,
                 style_from_status(&prereq_node.status),
@@ -391,7 +391,7 @@ impl App {
 
     fn render_side_panel(&self, area: Rect, frame: &mut Frame<'_>) {
         if let Some(id) = self.main_list.currently_selected_id() {
-            self.render_node_display(area, frame, self.lessons.get(id));
+            self.render_node_display(area, frame, self.lessons.get(id).unwrap());
         } else {
             self.render_help(area, frame);
         }
@@ -422,7 +422,7 @@ impl App {
             .style(border_style);
 
         let list_widget = List::new(self.main_list.ids().iter().map(|id| {
-            let node = self.lessons.get(*id);
+            let node = self.lessons.get(*id).unwrap();
             let text = Text::from(node.lesson.name.as_str());
             ListItem::new(text).style(style_from_status(&node.status))
         }))
@@ -463,7 +463,7 @@ impl App {
             AppState::BrowsingLessons => self.handle_key_browsing(key),
             AppState::AddingNewLesson(event_name) => match event_name.handle_key(key) {
                 LessonEditFormAction::Terminate(Some(lesson_info)) => {
-                    let id = self.lessons.create_new_node(lesson_info);
+                    let id = self.lessons.create_new_node(lesson_info).unwrap();
                     self.main_list.push(id);
                     self.state = AppState::BrowsingLessons;
                 }
@@ -472,7 +472,7 @@ impl App {
             },
             AppState::EditingLesson(id, lesson) => match lesson.handle_key(key) {
                 LessonEditFormAction::Terminate(Some(lesson_info)) => {
-                    self.lessons.edit_node(*id, lesson_info);
+                    self.lessons.edit_node(*id, lesson_info).unwrap();
                     self.state = AppState::BrowsingLessons;
                 }
                 LessonEditFormAction::Terminate(None) => self.state = AppState::BrowsingLessons,
@@ -488,9 +488,9 @@ impl App {
             }
             AppState::Studying(id, study_editor) => match study_editor.handle_key(key) {
                 StudyEditorAction::Terminate(Some(lesson_status)) => {
-                    let name = self.lessons.get(*id).lesson.name.clone();
-                    let direct_prerequisites =
-                        self.lessons.get(*id).lesson.direct_prerequisites.clone();
+                    let node  = self.lessons.get(*id).unwrap();
+                    let name = node.lesson.name.clone();
+                    let direct_prerequisites = node.lesson.direct_prerequisites.clone();
                     self.lessons.edit_node(
                         *id,
                         LessonInfo {
@@ -499,7 +499,7 @@ impl App {
                             status: lesson_status,
                             tags: vec![],
                         },
-                    );
+                    ).unwrap();
                     self.state = AppState::BrowsingLessons;
                 }
                 StudyEditorAction::Terminate(None) => self.state = AppState::BrowsingLessons,
@@ -508,7 +508,7 @@ impl App {
             AppState::ConfirmingDeletion(id) => match key.code {
                 KeyCode::Char('Y') => {
                     self.main_list.remove_node(*id);
-                    self.lessons.delete_node(*id);
+                    self.lessons.delete_node(*id).unwrap();
                     self.state = AppState::BrowsingLessons;
                 }
                 KeyCode::Char('n') | KeyCode::Esc => {
@@ -553,10 +553,10 @@ impl App {
                         self.lessons
                             .lessons()
                             .iter()
-                            .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected))
+                            .filter(|(&id, _)| !self.lessons.depends_on(id, currently_selected).unwrap())
                             .map(|(id, node)| (*id, node.lesson.clone()))
                             .collect(),
-                        self.lessons.get(currently_selected).lesson.clone(),
+                        self.lessons.get(currently_selected).unwrap().lesson.clone(),
                     );
                     self.state = AppState::EditingLesson(currently_selected, form);
                 }

@@ -111,20 +111,29 @@ pub struct Graph<T: IOBackend> {
     io_backend: T,
 }
 
+#[derive(Debug)]
+pub enum BuissonError<T: IOBackend> {
+    /// the queried id is not present in the graph.
+    MissingId(Id),
+    BackendError(T::Error),
+}
+
 impl<T: IOBackend> Graph<T> {
     /// create a new node in the graph, and update the relevant data structures inside. This is a
     /// public facing function, and should be able to be called without altering the correctness of
     /// the state of `self`. It also returns the Id of the newly created node.
-    pub fn create_new_node(&mut self, lesson_info: LessonInfo) -> Id {
+    pub fn create_new_node(&mut self, lesson_info: LessonInfo) -> Result<Id, BuissonError<T>> {
         let id = self.next_id;
         self.next_id += 1;
 
         for &parent in &lesson_info.direct_prerequisites {
+            // ok to unwrap here, if there is an error, it means the internal state was invalid to
+            // start with
             self.children.get_mut(&parent).unwrap().push(id);
         }
-        let node_status = self.compute_node_status(&lesson_info.direct_prerequisites, &lesson_info.status);
+        let node_status = self.compute_node_status(&lesson_info.direct_prerequisites, &lesson_info.status)?;
 
-        self.io_backend.add_new_lesson(id, &lesson_info).unwrap();
+        self.io_backend.add_new_lesson(id, &lesson_info).map_err(BuissonError::BackendError)?;
 
         self.children.insert(id, vec![]);
         self.nodes.insert(
@@ -135,27 +144,29 @@ impl<T: IOBackend> Graph<T> {
             },
         );
 
-        id
+        Ok(id)
     }
 
     /// Delete node with id `id`. Keeps the internal state consistent, removes the `id` from
     /// prerequisite lists of other nodes.
-    pub fn delete_node(&mut self, id: Id) {
-        let node = self.nodes.remove(&id).unwrap();
+    pub fn delete_node(&mut self, id: Id) -> Result<(), BuissonError<T>>{
+        let node = self.nodes.remove(&id)
+            .ok_or(BuissonError::MissingId(id))?;
 
         // we remove the id from the list of children of its prerequisites
         for prereq in node.lesson.direct_prerequisites {
             self.children
                 .get_mut(&prereq)
-                .unwrap()
+                .unwrap() // Ok to unwrap here, if there is an error it means the
+                                        // internal state was compromised.
                 .retain(|&child| child != id);
         }
 
         // we remove the id from the direct prerequisites list of its children, and also do it in
         // the database
-        let children = self.children.remove(&id).unwrap();
+        let children = self.children.remove(&id).unwrap(); // Ok to unwrap
         for &child_id in &children {
-            let child = self.nodes.get_mut(&child_id).unwrap();
+            let child = self.nodes.get_mut(&child_id).unwrap(); // Ok to unwrap
             child
                 .lesson
                 .direct_prerequisites
@@ -169,43 +180,49 @@ impl<T: IOBackend> Graph<T> {
         }
 
         for &child_id in &children {
-            self.update_node_status(child_id);
+            self.update_node_status(child_id)?;
         }
         self.io_backend
             .remove_lesson(id)
             .expect("the database delete to work");
+        Ok(())
     }
 
     /// Compute the runtime status of the node with id `id` in the graph, and updates the current
     /// value. If the value has changed, calls itself on the children of the node whose status we
     /// just modified, as their status depends on the status of `id`.
-    fn update_node_status(&mut self, id: Id) {
-        let lesson_status = &self.nodes.get(&id).unwrap().lesson.status;
-        let old_node_status = self.nodes.get(&id).unwrap().status.clone();
+    fn update_node_status(&mut self, id: Id) -> Result<(), BuissonError<T>> {
+        let node = self.get(id)?;
+        let lesson_status = node.lesson.status;
+        let old_node_status = node.status.clone();
 
         let new_node_status = self.compute_node_status(
-            &self.nodes.get(&id).unwrap().lesson.direct_prerequisites,
-            lesson_status,
-        );
+            &node.lesson.direct_prerequisites,
+            &lesson_status,
+        )?;
 
         // if the status hasnt been updated, there is no need to propagate the change to its
         // children. If it has however, their status may change and we need to recursively call the
         // function.
         if old_node_status != new_node_status {
+            // ok to unwrap here because we've checked above that the node existed
             self.nodes.get_mut(&id).unwrap().status = new_node_status;
             for &child in &self.children.get(&id).unwrap().clone() {
-                self.update_node_status(child);
+                self.update_node_status(child)?;
             }
         }
+        Ok(())
     }
 
     /// Edit the lesson with id `id`, replacing its info with `lesson_info`. This function also
     /// maintains the correctness of the state, by updating runtime info to reflect the new value
     /// for the lesson info.
-    pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) {
+    pub fn edit_node(&mut self, id: Id, lesson_info: LessonInfo) -> Result<(), BuissonError<T>> {
         // for a simple update of the parents/children relationship, we just wipe the slate clean
         // and then we rewrite everything with the updated values
-        for &parent in &self.nodes.get(&id).unwrap().lesson.direct_prerequisites {
+        let node = self.nodes.get(&id)
+            .ok_or(BuissonError::MissingId(id))?;
+        for &parent in &node.lesson.direct_prerequisites {
             self.children.get_mut(&parent).unwrap().retain(|&x| x != id);
         }
         for &parent in &lesson_info.direct_prerequisites {
@@ -217,14 +234,15 @@ impl<T: IOBackend> Graph<T> {
                 id,
                 &lesson_info,
             )
-            .unwrap();
+            .map_err(BuissonError::BackendError)?;
 
         self.nodes.get_mut(&id).unwrap().lesson.name = lesson_info.name;
         self.nodes.get_mut(&id).unwrap().lesson.direct_prerequisites =
             lesson_info.direct_prerequisites;
         self.nodes.get_mut(&id).unwrap().lesson.status = lesson_info.status;
 
-        self.update_node_status(id);
+        self.update_node_status(id)?;
+        Ok(())
     }
 
     /// Return the id of a lesson chosen uniformly among all pending lessons. In case there are
@@ -246,24 +264,25 @@ impl<T: IOBackend> Graph<T> {
     /// this function is called when the statuses of all the prereqs have been computed. It
     /// computes the runtime status of a node whose lesson has prereqs `prereqs` and status
     /// `lesson_status`.
-    fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> NodeStatus {
+    fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> Result<NodeStatus, BuissonError<T>> {
         if let LessonStatus::GoodEnough = lesson_status {
-            return NodeStatus::Ok;
+            return Ok(NodeStatus::Ok);
         }
         let mut missing_prereqs = vec![];
         for &prereq_id in prereqs {
-            if self.nodes.get(&prereq_id).unwrap().status != NodeStatus::Ok {
+            let prereq_node = self.get(prereq_id)?;
+            if prereq_node.status != NodeStatus::Ok {
                 missing_prereqs.push(prereq_id);
             }
         }
         if missing_prereqs.is_empty() {
             if lesson_status.needs_work() {
-                NodeStatus::Pending
+                Ok(NodeStatus::Pending)
             } else {
-                NodeStatus::Ok
+                Ok(NodeStatus::Ok)
             }
         } else {
-            NodeStatus::MissingPrereq(missing_prereqs)
+            Ok(NodeStatus::MissingPrereq(missing_prereqs))
         }
     }
 
@@ -291,8 +310,8 @@ impl<T: IOBackend> Graph<T> {
     }
 
     /// retrieve node with id `id`
-    pub fn get(&self, id: Id) -> &GraphNode {
-        self.nodes.get(&id).unwrap()
+    pub fn get(&self, id: Id) -> Result<&GraphNode, BuissonError<T>> {
+        self.nodes.get(&id).ok_or(BuissonError::MissingId(id))
     }
 
     /// Return how many nodes are contained in the graph
@@ -309,23 +328,23 @@ impl<T: IOBackend> Graph<T> {
     }
 
     /// return whether or not `id1` has `id2` as a prerequisite (not necessarily direct)
-    pub fn depends_on(&self, id1: Id, id2: Id) -> bool {
+    pub fn depends_on(&self, id1: Id, id2: Id) -> Result<bool, BuissonError<T>> {
         if id1 == id2 {
-            return true;
+            return Ok(true);
         }
 
-        for &prereq_id in &self.nodes.get(&id1).unwrap().lesson.direct_prerequisites {
-            if self.depends_on(prereq_id, id2) {
-                return true;
+        for &prereq_id in &self.get(id1)?.lesson.direct_prerequisites {
+            if self.depends_on(prereq_id, id2)? {
+                return Ok(true);
             }
         }
 
-        false
+        Ok(false)
     }
 
     /// return the ids of the lessons that have `id` as a prerequisite.
-    pub fn get_children(&self, id: &Id) -> &[Id] {
-        self.children.get(id).unwrap()
+    pub fn get_children(&self, id: Id) -> Result<&[Id], BuissonError<T>> {
+        Ok(self.children.get(&id).ok_or(BuissonError::MissingId(id))?)
     }
 }
 
@@ -451,6 +470,7 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
 mod tests {
     use super::*;
 
+    #[derive(Debug)]
     struct DummyIOBackend {
         lessons: HashMap<Id, LessonInfo>,
     }
@@ -690,14 +710,14 @@ mod tests {
             direct_prerequisites: vec![2],
             status: LessonStatus::NotPracticed,
             tags: vec![],
-        });
+        }).unwrap();
 
         g.create_new_node(LessonInfo {
             name: String::from("Test 6"),
             direct_prerequisites: vec![5, 2],
             status: LessonStatus::NotPracticed,
             tags: vec![],
-        });
+        }).unwrap();
 
         let nodes = nodes
             .into_iter()
@@ -770,7 +790,7 @@ mod tests {
                 status: LessonStatus::GoodEnough,
                 tags: vec![],
             },
-        );
+        ).unwrap();
 
         let nodes = nodes
             .into_iter()
