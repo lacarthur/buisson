@@ -42,8 +42,7 @@ pub enum LessonStatus {
 }
 
 impl LessonStatus {
-    /// Whether or not a lesson is considered "known", irrespective of whether or not its
-    /// prerequisites' status
+    /// Whether or not a lesson is considered "known", irrespective of its prerequisites's status
     fn needs_work(&self) -> bool {
         match &self {
             LessonStatus::GoodEnough => false,
@@ -72,7 +71,7 @@ pub enum NodeStatus {
     /// The lesson does not need work.
     Ok,
     /// One of the lessons prerequisite needs work, independantly of whether or not this lesson
-    /// needs work.
+    /// needs work. The prerequisites that do need work are stored in the `Vec`.
     MissingPrereq(Vec<Id>),
     /// This lesson needs work, and every one of its prerequisites are `Ok`.
     Pending,
@@ -244,7 +243,9 @@ impl<T: IOBackend> Graph<T> {
             .filter(move |&node| node.lesson.name.contains(&search_request))
     }
 
-    /// this function is called when the statuses of all the prereqs have been computed.
+    /// this function is called when the statuses of all the prereqs have been computed. It
+    /// computes the runtime status of a node whose lesson has prereqs `prereqs` and status
+    /// `lesson_status`.
     fn compute_node_status(&self, prereqs: &[Id], lesson_status: &LessonStatus) -> NodeStatus {
         if let LessonStatus::GoodEnough = lesson_status {
             return NodeStatus::Ok;
@@ -266,6 +267,8 @@ impl<T: IOBackend> Graph<T> {
         }
     }
 
+    /// Retrieve the graph structure from the backend. Usually called once, at the beginning of the
+    /// program.
     pub fn get_from_database(backend: T) -> Result<Self, T::Error> {
         let builder = GraphBuilder::load_from_database(backend)?;
         let ret = builder.into_graph();
@@ -320,6 +323,7 @@ impl<T: IOBackend> Graph<T> {
         false
     }
 
+    /// return the ids of the lessons that have `id` as a prerequisite.
     pub fn get_children(&self, id: &Id) -> &[Id] {
         self.children.get(id).unwrap()
     }
