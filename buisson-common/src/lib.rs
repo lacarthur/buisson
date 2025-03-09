@@ -330,16 +330,18 @@ impl<T: IOBackend> Graph<T> {
 
     /// Return the average step of every node that has been studied once.
     pub fn average_step(&self) -> f64 {
-        let steps = self.nodes.values()
-            .filter_map(|node| {
-                match node.lesson.status {
-                    LessonStatus::NotPracticed => None,
-                    LessonStatus::GoodEnough => None,
-                    LessonStatus::Practiced { level, .. } => Some(level),
-                }
+        let steps = self
+            .nodes
+            .values()
+            .filter_map(|node| match node.lesson.status {
+                LessonStatus::NotPracticed => None,
+                LessonStatus::GoodEnough => None,
+                LessonStatus::Practiced { level, .. } => Some(level),
             });
 
-        let (count, sum) = steps.fold((0, 0), |(acc_count, acc_sum), x| (acc_count + 1, acc_sum + x));
+        let (count, sum) = steps.fold((0, 0), |(acc_count, acc_sum), x| {
+            (acc_count + 1, acc_sum + x)
+        });
 
         (sum as f64) / (count as f64)
     }
