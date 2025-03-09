@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 
-const DB_FILENAME: &str = "lessons_dev.sqlite";
+const DB_FILENAME: &str = "lessons.sqlite";
 
 use crate::{
     components::{
@@ -401,11 +401,12 @@ impl App {
         let num_ok_lessons = self.lessons.num_ok_nodes();
         let num_lessons = self.lessons.num_nodes();
         let percent_ok_lessons = (num_ok_lessons as f64 / num_lessons as f64) * 100.0;
+        let average_step = self.lessons.average_step();
 
         frame.render_widget(
             Text::from(format!(
-                " OK Lessons : {}/{} ({:.2}%)",
-                num_ok_lessons, num_lessons, percent_ok_lessons
+                " OK Lessons : {}/{} ({:.2}%)    Average Step: {:.3}",
+                num_ok_lessons, num_lessons, percent_ok_lessons, average_step
             )),
             area,
         );
