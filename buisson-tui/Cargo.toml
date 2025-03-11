@@ -9,10 +9,9 @@ cli-log = "2.0.0"
 crossterm = "0.28.*"
 ratatui = "0.29.*"
 buisson-common = { path = "../buisson-common" }
+buisson-database = { path = "../buisson-database" }
 xdg = "2.5.2"
-rusqlite = "0.32.*"
 chrono = "0.4.38"
 unicode-width = "0.2.0"
 rand = "0.8.5"
-byteorder = "1.5.0"
-ron = "0.8.1"
+rusqlite = "0.32.*"

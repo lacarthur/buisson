@@ -22,7 +22,7 @@ use crate::{
     style_from_status,
 };
 
-use crate::SQLiteBackend;
+use buisson_database::SQLiteBackend;
 use buisson_common::{Graph, GraphNode, Id, LessonInfo, LessonStatus};
 
 /// The state of the main application

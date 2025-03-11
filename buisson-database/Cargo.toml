@@ -1,0 +1,11 @@
+[package]
+name = "buisson-database"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+
+[dependencies]
+buisson-common = { path = "../buisson-common" }
+rusqlite = "0.32.*"
+byteorder = "1.5.0"
+ron = "0.8.1"

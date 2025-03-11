@@ -67,17 +67,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "buisson-tui"
+name = "buisson-database"
 version = "0.1.0"
 dependencies = [
  "buisson-common",
  "byteorder",
+ "ron",
+ "rusqlite",
+]
+
+[[package]]
+name = "buisson-tui"
+version = "0.1.0"
+dependencies = [
+ "buisson-common",
+ "buisson-database",
  "chrono",
  "cli-log",
  "crossterm",
  "rand",
  "ratatui",
- "ron",
  "rusqlite",
  "unicode-width 0.2.0",
  "xdg",
