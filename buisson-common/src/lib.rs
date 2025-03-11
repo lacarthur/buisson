@@ -346,6 +346,21 @@ impl<T: IOBackend> Graph<T> {
         (sum as f64) / (count as f64)
     }
 
+    /// Return an expected value of the number of lessons to study per day to maintain every lesson
+    /// at OK
+    pub fn expected_num_lesson_per_day(&self) -> f64 {
+        let steps = self
+            .nodes
+            .values()
+            .filter_map(|node| match node.lesson.status {
+                LessonStatus::NotPracticed => None,
+                LessonStatus::GoodEnough => None,
+                LessonStatus::Practiced { level, .. } => Some(level),
+            });
+
+        steps.fold(0., |acc, x| acc + (x as f64) / (days_from_level(x) as f64))
+    }
+
     /// Return how many nodes are OK (i.e. don't need work)
     pub fn num_ok_nodes(&self) -> usize {
         self.nodes
