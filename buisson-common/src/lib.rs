@@ -6,6 +6,7 @@ use rand::{seq::IteratorRandom, Rng};
 use serde::{Deserialize, Serialize};
 
 pub type Id = u64;
+pub mod compat;
 
 fn days_from_level(level: u32) -> u64 {
     match level {

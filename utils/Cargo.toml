@@ -1,0 +1,10 @@
+[package]
+name = "utils"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+
+[dependencies]
+buisson-common = { path = "../buisson-common" }
+buisson-database = { path = "../buisson-database" }
+chrono = { version = "0.4.38", features = ["serde"] }
