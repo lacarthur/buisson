@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "buisson-common", "buisson-database",
-    "buisson-tui", "utils",
+    "buisson-tui",
 ]
 resolver = "2"
 
