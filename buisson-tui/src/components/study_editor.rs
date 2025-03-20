@@ -1,5 +1,5 @@
-use rand::thread_rng;
 use crossterm::event::{KeyCode, KeyEvent};
+use rand::thread_rng;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Style, Stylize},
@@ -20,7 +20,9 @@ impl StudyEditor {
         match self.state {
             StudyEditorState::GoodEnough => LessonStatus::GoodEnough,
             StudyEditorState::NotPracticed => LessonStatus::NotPracticed,
-            StudyEditorState::Practiced => LessonStatus::new_status_if_studied(self.step, &mut thread_rng())
+            StudyEditorState::Practiced => {
+                LessonStatus::new_status_if_studied(self.step, &mut thread_rng())
+            }
         }
     }
 }

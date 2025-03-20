@@ -22,8 +22,8 @@ use crate::{
     style_from_status,
 };
 
-use buisson_database::SQLiteBackend;
 use buisson_common::{Graph, GraphNode, Id, LessonInfo, LessonStatus};
+use buisson_database::SQLiteBackend;
 
 /// The state of the main application
 enum AppState {
@@ -336,7 +336,11 @@ impl App {
         let step_text = match node.lesson.status {
             LessonStatus::GoodEnough => String::from("Step : Known"),
             LessonStatus::NotPracticed => String::from("Step : Never Studied"),
-            LessonStatus::Practiced { level, last_practiced: _ , good_until} => format!("Step : {} - Good Until {}", level, good_until),
+            LessonStatus::Practiced {
+                level,
+                last_practiced: _,
+                good_until,
+            } => format!("Step : {} - Good Until {}", level, good_until),
         };
         let style = style_from_status(&node.status);
         let mut text = vec![

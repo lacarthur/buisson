@@ -1,7 +1,7 @@
+use buisson_common::{IOBackend, Id, LessonInfo};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rusqlite::Connection;
 use std::{collections::HashMap, io::Cursor, path::Path};
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use buisson_common::{ IOBackend, Id, LessonInfo };
 
 /// used to serialize the ids of the prerequisite lessons.
 fn ids_to_bytes(ids: &Vec<Id>) -> Vec<u8> {
@@ -59,8 +59,7 @@ impl SQLiteBackend {
     }
 }
 
-
- impl IOBackend for SQLiteBackend {
+impl IOBackend for SQLiteBackend {
     type Error = rusqlite::Error;
 
     fn query_lessons(&self) -> Result<HashMap<Id, LessonInfo>, Self::Error> {
@@ -73,7 +72,8 @@ impl SQLiteBackend {
                 let status_ron: String = row.get(3)?;
                 let tags_text: String = row.get(4)?;
 
-                let tags = tags_text.split(",")
+                let tags = tags_text
+                    .split(",")
                     .map(|c| c.to_string())
                     .collect::<Vec<_>>();
 
@@ -125,4 +125,4 @@ impl SQLiteBackend {
             .execute("DELETE FROM lesson WHERE id = ?1", (&id,))?;
         Ok(())
     }
-}   
+}

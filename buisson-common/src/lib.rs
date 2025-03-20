@@ -36,7 +36,11 @@ pub enum LessonStatus {
     GoodEnough,
     /// This lesson has been practiced, to the level `level`, and the last practice session
     /// happened on `date`.
-    Practiced { level: u32, last_practiced: NaiveDate, good_until: NaiveDate },
+    Practiced {
+        level: u32,
+        last_practiced: NaiveDate,
+        good_until: NaiveDate,
+    },
 }
 
 impl LessonStatus {
@@ -53,7 +57,11 @@ impl LessonStatus {
 
         let good_until = today + Days::new(days_to_next);
 
-        Self::Practiced { level: new_level, last_practiced: today, good_until }
+        Self::Practiced {
+            level: new_level,
+            last_practiced: today,
+            good_until,
+        }
     }
 }
 
@@ -63,8 +71,8 @@ impl LessonStatus {
         match &self {
             LessonStatus::GoodEnough => false,
             LessonStatus::NotPracticed => true,
-            LessonStatus::Practiced { 
-                level: _, 
+            LessonStatus::Practiced {
+                level: _,
                 last_practiced: _,
                 good_until,
             } => {
@@ -604,7 +612,7 @@ mod tests {
                         last_practiced: r_last_practiced,
                         good_until: _,
                     },
-                ) => l_level == r_level && l_last_practiced == r_last_practiced, 
+                ) => l_level == r_level && l_last_practiced == r_last_practiced,
                 _ => core::mem::discriminant(self) == core::mem::discriminant(other),
             }
         }
