@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use rand::thread_rng;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -8,10 +8,6 @@ use ratatui::{
 };
 
 use buisson_common::LessonStatus;
-
-fn today() -> NaiveDate {
-    chrono::offset::Local::now().date_naive()
-}
 
 enum StudyEditorState {
     GoodEnough,
@@ -24,10 +20,7 @@ impl StudyEditor {
         match self.state {
             StudyEditorState::GoodEnough => LessonStatus::GoodEnough,
             StudyEditorState::NotPracticed => LessonStatus::NotPracticed,
-            StudyEditorState::Practiced => LessonStatus::Practiced {
-                level: self.step,
-                date: today(),
-            },
+            StudyEditorState::Practiced => LessonStatus::new_status_if_studied(self.step, &mut thread_rng())
         }
     }
 }

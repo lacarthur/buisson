@@ -336,7 +336,7 @@ impl App {
         let step_text = match node.lesson.status {
             LessonStatus::GoodEnough => String::from("Step : Known"),
             LessonStatus::NotPracticed => String::from("Step : Never Studied"),
-            LessonStatus::Practiced { level, date: _ } => format!("Step : {}", level),
+            LessonStatus::Practiced { level, last_practiced: _ , good_until} => format!("Step : {} - Good Until {}", level, good_until),
         };
         let style = style_from_status(&node.status);
         let mut text = vec![

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use chrono::{Days, NaiveDate};
-use cli_log::debug;
 use rand::{seq::IteratorRandom, Rng};
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +27,6 @@ pub trait IOBackend {
     fn remove_lesson(&self, id: Id) -> Result<(), Self::Error>;
 }
 
-/// The status of a lesson, independant of the runtime
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum LessonStatus {
     /// This lesson has never been practiced
@@ -39,7 +37,25 @@ pub enum LessonStatus {
     GoodEnough,
     /// This lesson has been practiced, to the level `level`, and the last practice session
     /// happened on `date`.
-    Practiced { level: u32, date: NaiveDate },
+    Practiced { level: u32, last_practiced: NaiveDate, good_until: NaiveDate },
+}
+
+impl LessonStatus {
+    /// return a status for a lesson that has been studied to `level` today. This means generating
+    /// a random amount of days that this lesson is going to be good for.
+    pub fn new_status_if_studied<R: Rng + ?Sized>(new_level: u32, rng: &mut R) -> Self {
+        let today = chrono::offset::Local::now().date_naive();
+        let basic_day = days_from_level(new_level);
+        let diff = (0.1 * basic_day as f64) as u64;
+        let min_day = basic_day - diff;
+        let max_day = basic_day + diff;
+
+        let days_to_next = rng.gen_range(min_day..=max_day);
+
+        let good_until = today + Days::new(days_to_next);
+
+        Self::Practiced { level: new_level, last_practiced: today, good_until }
+    }
 }
 
 impl LessonStatus {
@@ -48,21 +64,17 @@ impl LessonStatus {
         match &self {
             LessonStatus::GoodEnough => false,
             LessonStatus::NotPracticed => true,
-            LessonStatus::Practiced { level, date } => {
-                let good_until = good_until(*level, *date);
+            LessonStatus::Practiced { 
+                level: _, 
+                last_practiced: _,
+                good_until,
+            } => {
                 let today = chrono::offset::Local::now().date_naive();
 
-                today >= good_until
+                today >= *good_until
             }
         }
     }
-}
-
-/// the date that a lesson is considered "known", given that it was last practiced on `date` to
-/// level `level`.
-fn good_until(level: u32, date: NaiveDate) -> NaiveDate {
-    date.checked_add_days(Days::new(days_from_level(level)))
-        .unwrap()
 }
 
 /// The current status of a node. This is computed at runtime, and depends on the current date, for
@@ -461,8 +473,6 @@ impl<Backend: IOBackend> GraphBuilder<Backend> {
     /// this function is to be called recursivley, changing the stored status of the nodes as it
     /// computes it.
     fn get_status(&mut self, id: Id) -> NodeStatus {
-        debug!("Calling `get_status` for lesson with id {}", id);
-        debug!("lessons = {:?}", &self.lessons);
         if let Some(status) = &self.lessons.get(&id).unwrap().1 {
             return status.clone();
         }
@@ -587,13 +597,15 @@ mod tests {
                 (
                     Self::Practiced {
                         level: l_level,
-                        date: l_date,
+                        last_practiced: l_last_practiced,
+                        good_until: _,
                     },
                     Self::Practiced {
                         level: r_level,
-                        date: r_date,
+                        last_practiced: r_last_practiced,
+                        good_until: _,
                     },
-                ) => l_level == r_level && l_date == r_date,
+                ) => l_level == r_level && l_last_practiced == r_last_practiced, 
                 _ => core::mem::discriminant(self) == core::mem::discriminant(other),
             }
         }
