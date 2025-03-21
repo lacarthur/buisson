@@ -378,7 +378,7 @@ impl<T: IOBackend> Graph<T> {
                 LessonStatus::Practiced { level, .. } => Some(level),
             });
 
-        steps.fold(0., |acc, x| acc + (x as f64) / (days_from_level(x) as f64))
+        steps.fold(0., |acc, x| acc + 1.0 / (days_from_level(x) as f64))
     }
 
     /// Return how many nodes are OK (i.e. don't need work)

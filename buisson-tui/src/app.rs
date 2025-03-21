@@ -406,11 +406,12 @@ impl App {
         let num_lessons = self.lessons.num_nodes();
         let percent_ok_lessons = (num_ok_lessons as f64 / num_lessons as f64) * 100.0;
         let average_step = self.lessons.average_step();
+        let busyness = self.lessons.expected_num_lesson_per_day();
 
         frame.render_widget(
             Text::from(format!(
-                " OK Lessons : {}/{} ({:.2}%)    Average Step: {:.3}",
-                num_ok_lessons, num_lessons, percent_ok_lessons, average_step
+                " OK Lessons : {}/{} ({:.2}%)    Average Step: {:.3}    Busyness: {:.3}",
+                num_ok_lessons, num_lessons, percent_ok_lessons, average_step, busyness
             )),
             area,
         );
