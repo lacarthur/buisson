@@ -410,7 +410,7 @@ impl App {
 
         frame.render_widget(
             Text::from(format!(
-                " OK Lessons : {}/{} ({:.2}%)    Average Step: {:.3}    Busyness: {:.3}",
+                " OK Lessons : {}/{} ({:.2}%)    Average Step: {:.3}    Load: {:.3}",
                 num_ok_lessons, num_lessons, percent_ok_lessons, average_step, busyness
             )),
             area,
