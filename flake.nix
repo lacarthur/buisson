@@ -19,8 +19,11 @@
     };
 
     packages."x86_64-linux".default = pkgs.rustPlatform.buildRustPackage {
-      name = "lo";
+      name = "buisson";
       src = ./.;
+      buildInputs = with pkgs; [
+        sqlite
+      ];
       cargoLock.lockFile = ./Cargo.lock;
     };
   };
